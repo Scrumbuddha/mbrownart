@@ -49,7 +49,7 @@ export function checkPassword(input: string, expected: string): boolean {
 
 /** True when the request carries a valid Studio session cookie. Fails closed if SESSION_SECRET is unset. */
 export async function isStudioRequest(): Promise<boolean> {
-  const secret = process.env.SESSION_SECRET;
+  const secret = process.env.SESSION_SECRET?.trim();
   if (!secret || secret.length < MIN_SECRET_LENGTH) return false;
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   return verifySessionToken(secret, token, new Date());

@@ -5,7 +5,7 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (pathname === "/studio/login") return NextResponse.next();
 
-  const secret = process.env.SESSION_SECRET;
+  const secret = process.env.SESSION_SECRET?.trim();
   const ok = secret && secret.length >= MIN_SECRET_LENGTH
     ? await verifySessionToken(secret, req.cookies.get(SESSION_COOKIE)?.value, new Date())
     : false;

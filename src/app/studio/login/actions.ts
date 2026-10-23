@@ -12,10 +12,11 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
   const result = await attemptLogin(getDb(), {
     ip,
-    password: String(formData.get("password") ?? ""),
+    password: String(formData.get("password") ?? "").trim(),
     now: new Date(),
-    expected: process.env.STUDIO_PASSWORD,
-    secret: process.env.SESSION_SECRET,
+    // Values pasted into Vercel often carry a stray space or newline.
+    expected: process.env.STUDIO_PASSWORD?.trim(),
+    secret: process.env.SESSION_SECRET?.trim(),
   });
 
   if (!result.ok) {

@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { createTestDb } from "../db/test-db";
 import { orders, paintings, type ShipTo } from "../db/schema";
 import { createFakePayPal } from "../paypal/fake";
-import { completeCheckout, startCheckout } from "./service";
+import { completeCheckout, startCheckout, updateShipping } from "./service";
 import { handleWebhookEvent, handleWebhookRequest } from "./webhook";
 import { vi } from "vitest";
 
@@ -24,6 +24,7 @@ async function setup() {
   const [p] = await db.insert(paintings).values(base).returning();
   const pp = createFakePayPal();
   const { paypalOrderId } = await startCheckout(db, pp, { paintingId: p.id, item: "original" }, now);
+  await updateShipping(db, pp, { paypalOrderId, country: "US", state: ship.state, zip: ship.zip });
   pp.approve(paypalOrderId, ship);
   return { db, pp, p, paypalOrderId };
 }

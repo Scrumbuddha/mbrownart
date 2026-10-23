@@ -37,9 +37,14 @@ async function expectCode(p: Promise<unknown>, code: string) {
   await expect(p).rejects.toBeInstanceOf(CheckoutError);
   await p.catch((e: CheckoutError) => expect(e.code).toBe(code));
 }
+/** The real flow: PayPal's shipping callback prices the address, then the buyer approves that total. */
+async function approve(db: Db, pp: FakePayPal, paypalOrderId: string, ship: ShipTo) {
+  await updateShipping(db, pp, { paypalOrderId, country: ship.country, state: ship.state, zip: ship.zip });
+  pp.approve(paypalOrderId, ship);
+}
 async function buy(db: Db, pp: FakePayPal, paintingId: string, now: Date, ship = flShip) {
   const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, now);
-  pp.approve(paypalOrderId, ship);
+  await approve(db, pp, paypalOrderId, ship);
   return completeCheckout(db, pp, paypalOrderId, now);
 }
 
@@ -109,8 +114,7 @@ describe("checkout service", () => {
   it("completes: order paid, original sold, hold cleared", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    await updateShipping(db, pp, { paypalOrderId, country: "US", state: "FL", zip: "33701" });
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     const paid = await completeCheckout(db, pp, paypalOrderId, at(MIN));
     expect(paid).toMatchObject({
       status: "paid", totalCents: 46010, buyerName: "Ann Lee", buyerEmail: "buyer@example.com", shipTo: flShip,
@@ -120,22 +124,46 @@ describe("checkout service", () => {
     expect(p).toMatchObject({ originalStatus: "sold", heldByOrderId: null, heldUntil: null });
   });
 
-  it("recomputes tax at completion from PayPal's ship-to before capturing", async () => {
+  it("does not capture when tax at completion changes the approved total (total_changed)", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip); // updateShipping never called
-    const paid = await completeCheckout(db, pp, paypalOrderId, t0);
-    expect(paid).toMatchObject({ taxCents: 3010, totalCents: 46010 });
-    expect((await pp.getOrder(paypalOrderId)).totalCents).toBe(46010);
+    pp.approve(paypalOrderId, flShip); // updateShipping never called: the buyer approved $430.00
+    await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "total_changed");
+    expect(pp.captureCount(paypalOrderId)).toBe(0);
+    expect(await order(db, paypalOrderId)).toMatchObject({ status: "failed", captureStartedAt: null });
+    expect((await painting(db, paintingId)).heldByOrderId).toBeNull();
+    // the buyer can start again straight away
+    await startCheckout(db, pp, { paintingId, item: "original" }, t0);
   });
 
-  it("refuses to capture when PayPal has no ship-to", async () => {
+  it("total_changed carries the buyer-facing explanation", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    pp.approve(paypalOrderId, flShip); // no shipping callback
+    await expect(completeCheckout(db, pp, paypalOrderId, t0)).rejects.toThrow(
+      "The total changed because sales tax was added for your shipping address. Please review and pay again.",
+    );
+  });
+
+  it("refuses to capture when PayPal has no ship-to, and releases the hold", async () => {
+    const { db, pp, paintingId } = await setup();
+    const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+    await approve(db, pp, paypalOrderId, flShip);
     pp.orders.get(paypalOrderId)!.shipTo = null;
     await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "amount_mismatch");
     expect(pp.captureCount(paypalOrderId)).toBe(0);
+    expect((await painting(db, paintingId)).heldByOrderId).toBeNull();
+    await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+  });
+
+  it("refuses to capture a non-US ship-to, and releases the hold", async () => {
+    const { db, pp, paintingId } = await setup();
+    const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+    pp.approve(paypalOrderId, { ...gaShip, state: "ON", zip: "M5V", country: "CA" });
+    await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "not_us");
+    expect(pp.captureCount(paypalOrderId)).toBe(0);
+    expect((await painting(db, paintingId)).heldByOrderId).toBeNull();
+    await startCheckout(db, pp, { paintingId, item: "original" }, t0);
   });
 
   it("refuses to capture when PayPal's total differs from ours", async () => {
@@ -143,14 +171,13 @@ describe("checkout service", () => {
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
     pp.approve(paypalOrderId, gaShip);
     pp.orders.get(paypalOrderId)!.totalCents = 100;
-    pp.updateAmounts = async () => {}; // PayPal accepts the update but keeps the wrong total
-    await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "amount_mismatch");
+    await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "total_changed");
     expect(pp.captureCount(paypalOrderId)).toBe(0);
-    // the attempt released its capture claim, so a later retry is not blocked
-    expect((await order(db, paypalOrderId)).captureStartedAt).toBeNull();
+    expect(await order(db, paypalOrderId)).toMatchObject({ status: "failed", captureStartedAt: null });
+    expect((await painting(db, paintingId)).heldByOrderId).toBeNull();
   });
 
-  it("pushes amounts at completion when PayPal disagrees even if our tax did not change", async () => {
+  it("does not capture when an earlier tax push failed and PayPal still shows the approved old total", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
     const real = pp.updateAmounts.bind(pp);
@@ -163,10 +190,31 @@ describe("checkout service", () => {
     expect((await order(db, paypalOrderId)).taxCents).toBe(3010);
     expect((await pp.getOrder(paypalOrderId)).totalCents).toBe(43000);
 
-    pp.approve(paypalOrderId, flShip);
-    const paid = await completeCheckout(db, pp, paypalOrderId, t0);
-    expect(paid).toMatchObject({ status: "paid", totalCents: 46010, attention: null });
-    expect((await pp.getOrder(paypalOrderId)).totalCents).toBe(46010);
+    pp.approve(paypalOrderId, flShip); // the buyer approved $430.00
+    await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "total_changed");
+    expect(pp.captureCount(paypalOrderId)).toBe(0);
+    expect((await order(db, paypalOrderId)).status).toBe("failed");
+    expect((await painting(db, paintingId)).heldByOrderId).toBeNull();
+  });
+
+  it("a stale attempt's release does not clear a newer capture claim", async () => {
+    const { db, pp, paintingId } = await setup();
+    const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+    await approve(db, pp, paypalOrderId, flShip);
+    let fail!: () => void;
+    const gate = new Promise<void>((_, reject) => { fail = () => reject(new Error("network")); });
+    let entered!: () => void;
+    const inGet = new Promise<void>((r) => { entered = r; });
+    pp.getOrder = async () => { entered(); await gate; throw new Error("unreachable"); };
+
+    const stale = completeCheckout(db, pp, paypalOrderId, t0);
+    await inGet;
+    // A newer attempt takes over the claim while the first is still running.
+    const newer = at(3 * MIN);
+    await db.update(orders).set({ captureStartedAt: newer }).where(eq(orders.paypalOrderId, paypalOrderId));
+    fail();
+    await expectCode(stale, "payment_failed");
+    expect((await order(db, paypalOrderId)).captureStartedAt?.getTime()).toBe(newer.getTime());
   });
 
   it("updateShipping leaves a non-pending order unchanged", async () => {
@@ -185,7 +233,7 @@ describe("checkout service", () => {
   it("a second completeCheckout during an in-flight capture gets in_progress and does not capture", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     const realCapture = pp.captureOrder.bind(pp);
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });
@@ -211,7 +259,7 @@ describe("checkout service", () => {
   it("a capture claim older than two minutes is treated as abandoned", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     await db.update(orders).set({ captureStartedAt: t0 }).where(eq(orders.paypalOrderId, paypalOrderId));
     await expectCode(completeCheckout(db, pp, paypalOrderId, at(MIN)), "in_progress");
     expect(pp.captureCount(paypalOrderId)).toBe(0);
@@ -233,7 +281,7 @@ describe("checkout service", () => {
   it("capture is idempotent", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     const first = await completeCheckout(db, pp, paypalOrderId, t0);
     const second = await completeCheckout(db, pp, paypalOrderId, at(MIN));
     expect(second).toEqual(first);
@@ -243,7 +291,7 @@ describe("checkout service", () => {
   it("refuses capture when hold expired and another buyer bought it", async () => {
     const { db, pp, paintingId } = await setup();
     const a = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(a.paypalOrderId, flShip);
+    await approve(db, pp, a.paypalOrderId, flShip);
     const bPaid = await buy(db, pp, paintingId, at(16 * MIN), gaShip);
     expect(bPaid.status).toBe("paid");
 
@@ -252,19 +300,19 @@ describe("checkout service", () => {
     expect((await order(db, a.paypalOrderId)).status).toBe("failed");
   });
 
-  it("refuses capture when hold expired and another buyer currently holds it", async () => {
+  it("refuses capture with held when hold expired and another buyer currently holds it", async () => {
     const { db, pp, paintingId } = await setup();
     const a = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(a.paypalOrderId, flShip);
+    pp.approve(a.paypalOrderId, gaShip);
     await startCheckout(db, pp, { paintingId, item: "original" }, at(16 * MIN));
-    await expectCode(completeCheckout(db, pp, a.paypalOrderId, at(17 * MIN)), "sold");
+    await expectCode(completeCheckout(db, pp, a.paypalOrderId, at(17 * MIN)), "held");
     expect(pp.captureCount(a.paypalOrderId)).toBe(0);
   });
 
   it("completes when own hold expired but nobody else took it", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     const paid = await completeCheckout(db, pp, paypalOrderId, at(20 * MIN));
     expect(paid.status).toBe("paid");
   });
@@ -272,7 +320,7 @@ describe("checkout service", () => {
   it("capture refused if artist marked sold mid-checkout", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     await db.update(paintings).set({ originalStatus: "sold" }).where(eq(paintings.id, paintingId));
     await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "sold");
     expect(pp.captureCount(paypalOrderId)).toBe(0);
@@ -292,7 +340,7 @@ describe("checkout service", () => {
   it("declined capture releases hold and marks failed", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     pp.failNextCapture("declined");
     await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "payment_failed");
     expect(pp.captureCount(paypalOrderId)).toBe(1);
@@ -305,7 +353,7 @@ describe("checkout service", () => {
   it("does not release the hold when PayPal's status cannot be confirmed", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     pp.failNextCapture("declined");
     const realGet = pp.getOrder.bind(pp);
     pp.getOrder = async (id) => { if (pp.captureCount(id) > 0) throw new Error("network"); return realGet(id); };
@@ -317,7 +365,7 @@ describe("checkout service", () => {
   it("timeout-but-completed capture is recorded as paid, not released", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     pp.failNextCapture("timeout-but-completed");
     const paid = await completeCheckout(db, pp, paypalOrderId, t0);
     expect(paid.status).toBe("paid");
@@ -361,7 +409,7 @@ describe("recordPaidOrder", () => {
   it("records once even when called twice with a stale order row", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     const stale = await order(db, paypalOrderId);
     const captured = await pp.captureOrder(paypalOrderId);
     const [a, b] = await Promise.all([
@@ -376,7 +424,7 @@ describe("recordPaidOrder", () => {
   it("refuses to record an order PayPal has not completed", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(paypalOrderId, flShip);
+    await approve(db, pp, paypalOrderId, flShip);
     const o = await order(db, paypalOrderId);
     await expectCode(recordPaidOrder(db, await pp.getOrder(paypalOrderId), o, t0), "payment_failed");
     expect((await order(db, paypalOrderId)).status).toBe("pending");
@@ -387,7 +435,7 @@ describe("recordPaidOrder after the painting was sold to someone else", () => {
   it("records the late payment as paid, flags sold_twice and leaves the painting alone", async () => {
     const { db, pp, paintingId } = await setup();
     const a = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
-    pp.approve(a.paypalOrderId, flShip);
+    await approve(db, pp, a.paypalOrderId, flShip);
     pp.failNextCapture("declined");
     await expectCode(completeCheckout(db, pp, a.paypalOrderId, t0), "payment_failed"); // A failed, hold released
     const bPaid = await buy(db, pp, paintingId, at(MIN), gaShip);

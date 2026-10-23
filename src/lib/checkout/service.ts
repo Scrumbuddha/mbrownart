@@ -64,10 +64,26 @@ async function claimCapture(db: Db, orderId: string, now: Date): Promise<Order |
   return row ?? null;
 }
 
-/** Ends a capture attempt that did not pay, so a retry or the webhook can proceed. */
-async function releaseCapture(db: Db, orderId: string): Promise<void> {
+/**
+ * Ends a capture attempt that did not pay, so a retry or the webhook can proceed. Keyed to the
+ * attempt's own claim, so a stale attempt never clears a newer attempt's claim.
+ */
+async function releaseCapture(db: Db, orderId: string, claim: Date): Promise<void> {
   await db.update(orders).set({ captureStartedAt: null })
-    .where(and(eq(orders.id, orderId), ne(orders.status, "paid")));
+    .where(and(eq(orders.id, orderId), ne(orders.status, "paid"), eq(orders.captureStartedAt, claim)));
+}
+
+/** Gives up on this order: frees the painting for the next checkout and marks the order failed. */
+async function abandon(db: Db, o: Order): Promise<void> {
+  await releaseHold(db, o.paintingId, o.id);
+  await markFailed(db, o.id);
+}
+
+/** Why an original can't be (re)held: someone else's live hold, or it is no longer for sale. */
+async function holdRefusal(db: Db, paintingId: string, now: Date): Promise<CheckoutError> {
+  const [p] = await db.select().from(paintings).where(eq(paintings.id, paintingId));
+  const heldByOther = p?.originalStatus === "for_sale" && p.heldUntil !== null && p.heldUntil >= now;
+  return new CheckoutError(heldByOther ? "held" : "sold");
 }
 
 /**
@@ -145,8 +161,7 @@ export async function startCheckout(
   try {
     ({ id: paypalOrderId } = await pp.createOrder({ referenceId: o.id, description, ...amountsOf(o) }));
   } catch {
-    await releaseHold(db, p.id, o.id);
-    await markFailed(db, o.id);
+    await abandon(db, o);
     throw new CheckoutError("payment_failed");
   }
   await db.update(orders).set({ paypalOrderId }).where(eq(orders.id, o.id));
@@ -187,8 +202,8 @@ export async function completeCheckout(
   try {
     return await captureClaimed(db, pp, claimed, paypalOrderId, now);
   } catch (e) {
-    // Any attempt that ends without paying gives the claim back (no-op once paid).
-    await releaseCapture(db, claimed.id);
+    // Any attempt that ends without paying gives its own claim back (no-op once paid).
+    await releaseCapture(db, claimed.id, claimed.captureStartedAt!);
     throw e;
   }
 }
@@ -201,23 +216,27 @@ async function captureClaimed(
   now: Date,
 ): Promise<Order> {
   // Price the order from PayPal's ship-to; never trust the browser's earlier updateShipping.
-  let ppOrder = await fetchPayPalOrder(pp, paypalOrderId);
+  const ppOrder = await fetchPayPalOrder(pp, paypalOrderId);
   const shipTo: ShipTo | null = ppOrder.shipTo;
-  if (!shipTo) throw new CheckoutError("amount_mismatch");
-  if (shipTo.country.trim().toUpperCase() !== "US") throw new CheckoutError("not_us");
-  const o = await saveTax(db, claimed, shipTo.state, shipTo.zip, claimed.captureStartedAt);
-  // Push whenever PayPal disagrees, which also repairs an earlier failed updateAmounts.
-  if (ppOrder.totalCents !== o.totalCents) {
-    await pushAmounts(pp, paypalOrderId, amountsOf(o));
-    ppOrder = await fetchPayPalOrder(pp, paypalOrderId);
+  if (!shipTo || shipTo.country.trim().toUpperCase() !== "US") {
+    // Nothing to capture: free the painting so the buyer can retry straight away.
+    await releaseHold(db, claimed.paintingId, claimed.id);
+    throw new CheckoutError(shipTo ? "not_us" : "amount_mismatch");
   }
-  if (ppOrder.totalCents !== o.totalCents) throw new CheckoutError("amount_mismatch");
+  const o = await saveTax(db, claimed, shipTo.state, shipTo.zip, claimed.captureStartedAt);
 
   // An original must still be for sale and not held by someone else; (re)take the hold so no
   // new checkout can start while we capture.
   if (o.item === "original" && !(await claimHold(db, o.paintingId, o.id, now))) {
     await markFailed(db, o.id);
-    throw new CheckoutError("sold");
+    throw await holdRefusal(db, o.paintingId, now);
+  }
+
+  // Never charge a total the buyer did not approve (e.g. Florida tax added after the shipping
+  // callback didn't fire). End this order; the buyer reviews the new total and pays again.
+  if (ppOrder.totalCents !== o.totalCents) {
+    await abandon(db, o);
+    throw new CheckoutError("total_changed");
   }
 
   let captured: PayPalOrder;
@@ -234,8 +253,7 @@ async function captureClaimed(
     }
     if (actual.status === "COMPLETED") return recordPaidOrder(db, actual, o, now);
     // A declined capture ends this PayPal order; a retry is a fresh startCheckout.
-    await releaseHold(db, o.paintingId, o.id);
-    await markFailed(db, o.id);
+    await abandon(db, o);
     throw new CheckoutError("payment_failed");
   }
   return recordPaidOrder(db, captured, o, now);

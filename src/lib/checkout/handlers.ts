@@ -40,9 +40,10 @@ export function handleCreate(db: Db, pp: PayPalApi, body: unknown, now: Date): P
 }
 
 export function handleShipping(db: Db, pp: PayPalApi, body: unknown): Promise<HandlerResult> {
-  if (!isObj(body) || !str(body.paypalOrderId) || !str(body.country) || !str(body.state) || !str(body.zip)) {
-    return Promise.resolve(GENERIC);
-  }
+  if (!isObj(body) || !str(body.paypalOrderId) || !str(body.country)) return Promise.resolve(GENERIC);
+  // Check the country first, so a non-US address with no state or zip still gets not_us.
+  if (body.country.trim().toUpperCase() !== "US") return Promise.resolve(errorResult(new CheckoutError("not_us")));
+  if (!str(body.state) || !str(body.zip)) return Promise.resolve(GENERIC);
   const input = { paypalOrderId: body.paypalOrderId, country: body.country, state: body.state, zip: body.zip };
   return guard(async () => ({ status: 200, body: await updateShipping(db, pp, input) }));
 }

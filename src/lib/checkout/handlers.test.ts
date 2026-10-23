@@ -67,6 +67,16 @@ describe("checkout handlers", () => {
   });
 });
 
+describe("shipping country check", () => {
+  it("returns 422 not_us for a non-US address even with an empty state and zip", async () => {
+    const { db, pp, id } = await setup();
+    const c = await handleCreate(db, pp, { paintingId: id, item: "original" }, now);
+    const { paypalOrderId } = c.body as { paypalOrderId: string };
+    const s = await handleShipping(db, pp, { paypalOrderId, country: "GB", state: "", zip: "" });
+    expect(s).toEqual({ status: 422, body: { code: "not_us", message: CHECKOUT_MESSAGES.not_us } });
+  });
+});
+
 describe("in_progress mapping", () => {
   it("maps an in-flight capture to 409 in_progress", async () => {
     const { db, pp, id } = await setup();

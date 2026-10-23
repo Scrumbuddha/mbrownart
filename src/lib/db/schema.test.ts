@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createTestDb } from "./test-db";
 import { getSettings } from "./settings";
-import { paintings } from "./schema";
+import { paintings, settings } from "./schema";
 
 const base = {
   title: "X", medium: "Watercolor", size: "8x10", year: 2024,
@@ -14,6 +14,13 @@ describe("schema", () => {
     const db = await createTestDb();
     const s = await getSettings(db);
     expect(s).toMatchObject({ shippingCents: 1000, taxEnabled: true, artistName: "M Brown" });
+  });
+
+  it("has exactly one settings row, seeded by the migrations", async () => {
+    const db = await createTestDb();
+    const rows = await db.select().from(settings);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(1);
   });
 
   it("applies painting defaults", async () => {

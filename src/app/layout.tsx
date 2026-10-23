@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
 import { Roboto } from "next/font/google";
-import { getDb } from "@/lib/db/client";
-import { getSettings } from "@/lib/db/settings";
-import { SiteHeader } from "./_components/SiteHeader";
 import "./globals.css";
 
 const roboto = Roboto({
@@ -11,24 +8,17 @@ const roboto = Roboto({
   display: "swap",
 });
 
-// The header shows the artist name from Settings, so read it per request.
-export const revalidate = 0;
-
 export const metadata: Metadata = {
-  title: "M Brown Watercolors",
+  title: "Watercolors",
   description: "Original watercolor paintings and prints.",
 };
 
-export default async function RootLayout({
+export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const { artistName } = await getSettings(getDb());
   return (
     <html lang="en">
-      <body className={roboto.className}>
-        <SiteHeader artistName={artistName} />
-        {children}
-      </body>
+      <body className={roboto.className}>{children}</body>
     </html>
   );
 }

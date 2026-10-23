@@ -8,6 +8,5 @@ import * as schema from "./schema";
 export async function createTestDb(): Promise<Db> {
   const db = drizzle(new PGlite(), { schema });
   await migrate(db, { migrationsFolder: fileURLToPath(new URL("../../../drizzle", import.meta.url)) });
-  await db.insert(schema.settings).values({ id: 1 });
   return db as unknown as Db;
 }

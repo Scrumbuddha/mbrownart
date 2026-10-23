@@ -1,13 +1,12 @@
 import type { Metadata } from "next";
-import { getDb } from "@/lib/db/client";
-import { getSettings } from "@/lib/db/settings";
+import { siteSettings } from "../data";
 
 export const revalidate = 0;
 
-export const metadata: Metadata = { title: "Contact · M Brown Watercolors" };
+export const metadata: Metadata = { title: "Contact" };
 
 export default async function ContactPage() {
-  const { contactEmail, instagramUrl } = await getSettings(getDb());
+  const { contactEmail, instagramUrl } = await siteSettings();
   return (
     <main className="site-main">
       <div className="prose">

@@ -35,6 +35,7 @@ const messageOf = (body: ErrorBody): string =>
   typeof body.message === "string" && body.message ? body.message : CHECKOUT_MESSAGES.payment_failed;
 
 export function BuyBox({ paintingId, options }: { paintingId: string; options: BuyOption[] }) {
+  const clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
   const router = useRouter();
   const firstOpen = options.find((o) => !o.disabled)?.item ?? null;
   const [item, setItem] = useState<BuyItem | null>(firstOpen);
@@ -79,9 +80,8 @@ export function BuyBox({ paintingId, options }: { paintingId: string; options: B
       zip: a.postalCode,
     });
     if (r.ok) return;
-    if (r.status === 422) return reject(errors.COUNTRY_ERROR);
-    if (r.status === 409) fail(messageOf(r.body));
-    return reject(errors.ADDRESS_ERROR);
+    fail(messageOf(r.body));
+    return reject(r.status === 422 ? errors.COUNTRY_ERROR : errors.ADDRESS_ERROR);
   };
 
   const onApprove: PayPalButtonsComponentProps["onApprove"] = async (data) => {
@@ -127,18 +127,22 @@ export function BuyBox({ paintingId, options }: { paintingId: string; options: B
       {error ? <p className="buy-error" role="alert">{error}</p> : null}
 
       <div className="buy-buttons">
-        <PayPalScriptProvider
-          options={{
-            clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID ?? "",
-            currency: "USD",
-            intent: "capture",
-            components: "buttons",
-            enableFunding: "card",
-          }}
-        >
-          <PayPalButtons fundingSource="paypal" style={{ layout: "vertical" }} {...buttons} />
-          <PayPalButtons fundingSource="card" style={{ layout: "vertical" }} {...buttons} />
-        </PayPalScriptProvider>
+        {clientId ? (
+          <PayPalScriptProvider
+            options={{
+              clientId,
+              currency: "USD",
+              intent: "capture",
+              components: "buttons",
+              enableFunding: "card",
+            }}
+          >
+            <PayPalButtons fundingSource="paypal" style={{ layout: "vertical" }} {...buttons} />
+            <PayPalButtons fundingSource="card" style={{ layout: "vertical" }} {...buttons} />
+          </PayPalScriptProvider>
+        ) : (
+          <p className="buy-note">Online checkout isn&apos;t available right now. Please use the Contact page.</p>
+        )}
       </div>
     </div>
   );

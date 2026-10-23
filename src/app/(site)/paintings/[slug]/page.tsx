@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getDb } from "@/lib/db/client";
-import { getSettings } from "@/lib/db/settings";
 import { formatCents } from "@/lib/money";
-import { getPaintingBySlug, isOriginalPurchasable } from "@/lib/paintings/queries";
-import { Lightbox } from "../../_components/Lightbox";
+import { isOriginalPurchasable } from "@/lib/paintings/queries";
+import { paintingBySlug, siteSettings } from "../../data";
+import { Lightbox } from "@/app/_components/Lightbox";
 import { BuyBox, type BuyOption } from "./BuyBox";
 
 export const revalidate = 0;
@@ -12,15 +11,14 @@ export const revalidate = 0;
 type Params = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const p = await getPaintingBySlug(getDb(), (await params).slug);
-  return p ? { title: `${p.title} · M Brown Watercolors`, description: p.description || undefined } : {};
+  const p = await paintingBySlug((await params).slug);
+  return p ? { title: p.title, description: p.description || undefined } : {};
 }
 
 export default async function PaintingPage({ params }: Params) {
-  const db = getDb();
-  const p = await getPaintingBySlug(db, (await params).slug);
+  const p = await paintingBySlug((await params).slug);
   if (!p) notFound();
-  const settings = await getSettings(db);
+  const settings = await siteSettings();
 
   const options: BuyOption[] = [];
   if (p.originalStatus === "sold") {

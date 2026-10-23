@@ -22,6 +22,13 @@
       "when": 1792770177060,
       "tag": "0002_broken_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792771315081,
+      "tag": "0003_seed_settings",
+      "breakpoints": true
     }
   ]
 }

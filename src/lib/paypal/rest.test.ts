@@ -32,7 +32,8 @@ describe("createPayPalRest", () => {
     expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toBe("ref-1");
     const body = JSON.parse(init.body as string);
     expect(body.intent).toBe("CAPTURE");
-    expect(body.payment_source.paypal.experience_context.shipping_preference).toBe("GET_FROM_FILE");
+    // No payment_source: it would pin the PayPal wallet and can break the card button. GET_FROM_FILE is the default.
+    expect(body).not.toHaveProperty("payment_source");
     const amount = body.purchase_units[0].amount;
     expect(amount.currency_code).toBe("USD");
     expect(amount.value).toBe("430.00");

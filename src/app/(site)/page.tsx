@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db/client";
 import { listGallery } from "@/lib/paintings/queries";
-import { GalleryGrid } from "./_components/GalleryGrid";
+import { GalleryGrid } from "@/app/_components/GalleryGrid";
 
 export const revalidate = 0;
 

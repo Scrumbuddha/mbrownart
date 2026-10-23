@@ -1,13 +1,12 @@
 import type { Metadata } from "next";
-import { getDb } from "@/lib/db/client";
-import { getSettings } from "@/lib/db/settings";
+import { siteSettings } from "../data";
 
 export const revalidate = 0;
 
-export const metadata: Metadata = { title: "About · M Brown Watercolors" };
+export const metadata: Metadata = { title: "About" };
 
 export default async function AboutPage() {
-  const { artistName, aboutText, aboutPhotoUrl } = await getSettings(getDb());
+  const { artistName, aboutText, aboutPhotoUrl } = await siteSettings();
   const paragraphs = aboutText.split(/\r?\n\s*\r?\n/).map((p) => p.trim()).filter(Boolean);
   return (
     <main className="site-main">

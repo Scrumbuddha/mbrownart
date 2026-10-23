@@ -126,7 +126,6 @@ export function createPayPalRest(env: PayPalEnv): PayPalApi {
               amount: amountBody(input),
             },
           ],
-          payment_source: { paypal: { experience_context: { shipping_preference: "GET_FROM_FILE" } } },
         },
         { "PayPal-Request-Id": input.referenceId },
       );

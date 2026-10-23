@@ -67,6 +67,14 @@ describe("GalleryGrid", () => {
     expect(link.textContent).toBe("Harbor Light · Sold");
   });
 
+  it("shows the print size and price on the Prints page variant", () => {
+    const p = painting({ printEnabled: true, printSize: "8 × 10 in", printPriceCents: 4500 });
+    render(<GalleryGrid paintings={[p]} variant="prints" />);
+    const link = screen.getByRole("link", { name: /Harbor Light/ });
+    expect(link.textContent).toBe("Harbor Light · Print 8 × 10 in · $45");
+    expect(within(link).queryByText("$420")).toBeNull();
+  });
+
   it("renders each image at its stored size, uncropped", () => {
     render(<GalleryGrid paintings={[painting({})]} />);
     const img = screen.getByRole("img", { name: "Harbor Light" });

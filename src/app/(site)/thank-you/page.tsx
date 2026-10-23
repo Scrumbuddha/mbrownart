@@ -8,7 +8,7 @@ import { formatCents } from "@/lib/money";
 export const revalidate = 0;
 
 // Reachable by anyone holding the URL, so it shows no buyer details.
-export const metadata: Metadata = { title: "Thank you · M Brown Watercolors", robots: { index: false } };
+export const metadata: Metadata = { title: "Thank you", robots: { index: false } };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

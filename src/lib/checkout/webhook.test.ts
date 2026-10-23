@@ -46,6 +46,18 @@ describe("handleWebhookEvent", () => {
     expect(await handleWebhookEvent(db, pp, evt(paypalOrderId), now)).toBe("already-paid");
   });
 
+  it("clears payment_pending when PayPal reports the pending capture completed", async () => {
+    const { db, pp, paypalOrderId } = await setup();
+    pp.failNextCapture("capture-pending");
+    expect((await completeCheckout(db, pp, paypalOrderId, now)).attention).toBe("payment_pending");
+    // Still pending at PayPal: nothing changes.
+    expect(await handleWebhookEvent(db, pp, evt(paypalOrderId), now)).toBe("already-paid");
+    pp.orders.get(paypalOrderId)!.captureStatus = "COMPLETED";
+    expect(await handleWebhookEvent(db, pp, evt(paypalOrderId), now)).toBe("cleared");
+    const [o] = await db.select().from(orders).where(eq(orders.paypalOrderId, paypalOrderId));
+    expect(o).toMatchObject({ status: "paid", attention: null });
+  });
+
   it("ignores unknown event types and unknown orders", async () => {
     const { db, pp, paypalOrderId } = await setup();
     expect(await handleWebhookEvent(db, pp, evt(paypalOrderId, "CHECKOUT.ORDER.APPROVED"), now)).toBe("ignored");

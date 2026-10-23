@@ -86,6 +86,7 @@ describe("createPayPalRest", () => {
       totalCents: 43000,
       payer: { name: "Ann Lee", email: "ann@example.com" },
       shipTo: { name: "Ann Lee", line1: "1 Main St", line2: "Apt 2", city: "Tampa", state: "FL", zip: "33601", country: "US" },
+      captureStatus: null,
     });
   });
 
@@ -113,6 +114,30 @@ describe("createPayPalRest", () => {
     expect(init.method).toBe("POST");
     expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toBe("capture-ORD1");
     expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("exposes the capture-level status, separate from the order status", async () => {
+    let captureStatus: string | undefined = "DECLINED";
+    mockFetch(() =>
+      json({
+        id: "ORD1", status: "COMPLETED",
+        purchase_units: [{ payments: { captures: captureStatus ? [{ status: captureStatus, amount: { value: "430.00" } }] : [] } }],
+      }),
+    );
+    const pp = createPayPalRest(env);
+    for (const s of ["DECLINED", "FAILED", "PENDING", "COMPLETED"]) {
+      captureStatus = s;
+      expect((await pp.captureOrder("ORD1")).captureStatus).toBe(s);
+    }
+    // Money taken and later (partly) refunded still counts as captured.
+    for (const s of ["REFUNDED", "PARTIALLY_REFUNDED"]) {
+      captureStatus = s;
+      expect((await pp.getOrder("ORD1")).captureStatus).toBe("COMPLETED");
+    }
+    captureStatus = undefined;
+    expect((await pp.getOrder("ORD1")).captureStatus).toBeNull();
+    captureStatus = "SOMETHING_NEW";
+    await expect(pp.getOrder("ORD1")).rejects.toBeInstanceOf(PayPalError);
   });
 
   it("verifyWebhook returns true only on SUCCESS", async () => {

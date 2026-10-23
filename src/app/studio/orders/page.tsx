@@ -2,16 +2,12 @@ import { requireStudio } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { formatCents } from "@/lib/money";
 import { listPaidOrders, type PaidOrder } from "@/lib/orders/admin";
+import { ATTENTION_MESSAGES, canShip } from "@/lib/orders/attention";
 import { floridaDate } from "@/lib/orders/tax-csv";
 import { ResendButton } from "./ResendButton";
 import { ShippedCheckbox } from "./ShippedCheckbox";
 
 export const dynamic = "force-dynamic";
-
-const ATTENTION = {
-  sold_twice: "Refund needed: this original had already sold to another buyer. Refund this buyer in PayPal.",
-  amount_mismatch: "Please check this payment in PayPal: the amount paid didn't match the order.",
-} as const;
 
 const card = { border: "1px solid #ddd", borderRadius: 6, padding: 16, marginBottom: 16 } as const;
 
@@ -21,7 +17,7 @@ function OrderCard({ o }: { o: PaidOrder }) {
     <section style={{ ...card, ...(o.attention ? { border: "2px solid #b04a3a" } : {}) }}>
       {o.attention && (
         <p role="alert" style={{ background: "#fbeeea", color: "#b04a3a", fontWeight: 500, padding: 12, borderRadius: 4, margin: "0 0 12px" }}>
-          {ATTENTION[o.attention]}
+          {ATTENTION_MESSAGES[o.attention]}
         </p>
       )}
       <p style={{ margin: "0 0 4px", color: "#777", fontSize: 14 }}>{o.paidAt ? floridaDate(o.paidAt) : ""}</p>
@@ -43,7 +39,7 @@ function OrderCard({ o }: { o: PaidOrder }) {
         )}
         {o.buyerEmail && <><br /><span style={{ color: "#777" }}>{o.buyerEmail}</span></>}
       </p>
-      {o.attention === "sold_twice" ? null : o.shippedAt ? (
+      {!canShip(o) ? null : o.shippedAt ? (
         <>
           <p style={{ margin: "0 0 8px", color: "#777", fontSize: 15 }}>Shipped {floridaDate(o.shippedAt)}</p>
           {!o.shippedEmailSentAt && <ResendButton orderId={o.id} />}

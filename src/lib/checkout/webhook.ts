@@ -1,10 +1,10 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { orders } from "../db/schema";
 import type { PayPalApi } from "../paypal/types";
 import { recordPaidOrder } from "./service";
 
-export type WebhookResult = "recorded" | "ignored" | "already-paid";
+export type WebhookResult = "recorded" | "ignored" | "already-paid" | "cleared";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export async function handleWebhookEvent(
@@ -19,7 +19,14 @@ export async function handleWebhookEvent(
 
   const [row] = await db.select().from(orders).where(eq(orders.paypalOrderId, paypalOrderId));
   if (!row) return "ignored";
-  if (row.status === "paid") return "already-paid";
+  if (row.status === "paid") {
+    if (row.attention !== "payment_pending") return "already-paid";
+    // A pending capture has cleared: the order can be shipped now.
+    if ((await pp.getOrder(paypalOrderId)).captureStatus !== "COMPLETED") return "already-paid";
+    await db.update(orders).set({ attention: null })
+      .where(and(eq(orders.id, row.id), eq(orders.attention, "payment_pending")));
+    return "cleared";
+  }
 
   const ppOrder = await pp.getOrder(paypalOrderId);
   await recordPaidOrder(db, ppOrder, row, now);

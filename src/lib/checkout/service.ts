@@ -252,19 +252,26 @@ async function captureClaimed(
       // order pending and the hold to expire; the webhook reconciles.
       throw new CheckoutError("unconfirmed");
     }
-    if (actual.status === "COMPLETED") return recordPaidOrder(db, actual, o, now);
+    if (actual.status === "COMPLETED" && !captureDeclined(actual)) return recordPaidOrder(db, actual, o, now);
     // A declined capture ends this PayPal order; a retry is a fresh startCheckout.
+    await abandon(db, o);
+    throw new CheckoutError("payment_failed");
+  }
+  // A 2xx capture can still carry a DECLINED or FAILED capture: no money was taken.
+  if (captureDeclined(captured)) {
     await abandon(db, o);
     throw new CheckoutError("payment_failed");
   }
   return recordPaidOrder(db, captured, o, now);
 }
 
+const captureDeclined = (o: PayPalOrder) => o.captureStatus === "DECLINED" || o.captureStatus === "FAILED";
+
 /**
  * Marks the order paid (the money was taken, so this always happens) and, for an original,
  * marks the painting sold if it was still ours to sell. Otherwise flags the order
- * `sold_twice`; a captured total that differs from ours is flagged `amount_mismatch`.
- * Idempotent; shared with the webhook.
+ * `sold_twice`; a capture PayPal is still clearing is flagged `payment_pending`; a captured
+ * total that differs from ours is flagged `amount_mismatch`. Idempotent; shared with the webhook.
  */
 export async function recordPaidOrder(
   db: Db,
@@ -275,7 +282,7 @@ export async function recordPaidOrder(
   if (paypalOrder.id !== orderRow.paypalOrderId) {
     throw new Error(`PayPal order ${paypalOrder.id} does not belong to order ${orderRow.id}`);
   }
-  if (paypalOrder.status !== "COMPLETED") throw new CheckoutError("payment_failed");
+  if (paypalOrder.status !== "COMPLETED" || captureDeclined(paypalOrder)) throw new CheckoutError("payment_failed");
   return db.transaction(async (tx) => {
     const [paid] = await tx.update(orders)
       .set({
@@ -292,7 +299,11 @@ export async function recordPaidOrder(
       return existing;
     }
 
-    let attention: Order["attention"] = paypalOrder.totalCents !== paid.totalCents ? "amount_mismatch" : null;
+    // Most serious wins: sold_twice (refund owed), then payment_pending (don't ship yet), then
+    // amount_mismatch.
+    let attention: Order["attention"] =
+      paypalOrder.captureStatus === "PENDING" ? "payment_pending"
+        : paypalOrder.totalCents !== paid.totalCents ? "amount_mismatch" : null;
     if (paid.item === "original") {
       const sold = await tx.update(paintings)
         .set({ originalStatus: "sold", heldUntil: null, heldByOrderId: null })
@@ -302,7 +313,6 @@ export async function recordPaidOrder(
           or(isNull(paintings.heldByOrderId), eq(paintings.heldByOrderId, paid.id), lt(paintings.heldUntil, now)),
         ))
         .returning({ id: paintings.id });
-      // sold_twice is the more serious problem, so it wins over amount_mismatch.
       if (sold.length === 0) attention = "sold_twice";
     }
     if (!attention) return paid;

@@ -1,6 +1,7 @@
-import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, notInArray, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { orders, paintings, type Order } from "../db/schema";
+import { NO_SHIP_ATTENTION } from "./attention";
 
 export type PaidOrder = Order & { paintingTitle: string };
 
@@ -15,19 +16,19 @@ export async function listPaidOrders(db: Db): Promise<PaidOrder[]> {
   return rows.map((r) => ({ ...r.order, paintingTitle: r.paintingTitle }));
 }
 
-// A sold_twice order has nothing to ship: the buyer is owed a refund.
-const notSoldTwice = or(isNull(orders.attention), ne(orders.attention, "sold_twice"));
+// A refund is owed, or PayPal hasn't cleared the money: nothing to ship (see attention.ts).
+const shippable = or(isNull(orders.attention), notInArray(orders.attention, [...NO_SHIP_ATTENTION]));
 
 /**
  * Marks a paid order shipped, then calls `send` and records shippedEmailSentAt when it succeeds.
- * Does nothing if it is already shipped, not paid, or a sold_twice order. If `send` throws,
+ * Does nothing if it is already shipped, not paid, or not shippable (see canShip). If `send` throws,
  * shippedAt stays set (shippedEmailSentAt stays null) and the error propagates.
  */
 export async function markShipped(
   db: Db, orderId: string, now: Date, send: (o: Order) => Promise<void>,
 ): Promise<void> {
   const [order] = await db.update(orders).set({ shippedAt: now })
-    .where(and(eq(orders.id, orderId), eq(orders.status, "paid"), isNull(orders.shippedAt), notSoldTwice))
+    .where(and(eq(orders.id, orderId), eq(orders.status, "paid"), isNull(orders.shippedAt), shippable))
     .returning();
   if (!order) return;
   await send(order);
@@ -44,7 +45,7 @@ export async function resendShippedEmail(
   const [order] = await db.update(orders).set({ shippedEmailSentAt: now })
     .where(and(
       eq(orders.id, orderId), eq(orders.status, "paid"),
-      sql`${orders.shippedAt} is not null`, isNull(orders.shippedEmailSentAt), notSoldTwice,
+      sql`${orders.shippedAt} is not null`, isNull(orders.shippedEmailSentAt), shippable,
     ))
     .returning();
   if (!order) return;

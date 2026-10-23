@@ -16,7 +16,26 @@ describe("createFakePayPal", () => {
   it("createOrder yields CREATED with the totals", async () => {
     const p = createFakePayPal();
     const { id } = await p.createOrder(input);
-    expect(await p.getOrder(id)).toEqual({ id, status: "CREATED", totalCents: 43000, payer: null, shipTo: null });
+    expect(await p.getOrder(id)).toEqual({
+      id, status: "CREATED", totalCents: 43000, payer: null, shipTo: null, captureStatus: null,
+    });
+  });
+
+  it("a normal capture reports captureStatus COMPLETED", async () => {
+    const { p, id } = await approved();
+    expect((await p.captureOrder(id)).captureStatus).toBe("COMPLETED");
+  });
+
+  it("capture-declined / capture-failed / capture-pending return 2xx with that capture status", async () => {
+    for (const [kind, status] of [
+      ["capture-declined", "DECLINED"], ["capture-failed", "FAILED"], ["capture-pending", "PENDING"],
+    ] as const) {
+      const { p, id } = await approved();
+      p.failNextCapture(kind);
+      const o = await p.captureOrder(id);
+      expect(o).toMatchObject({ status: "COMPLETED", captureStatus: status });
+      expect((await p.getOrder(id)).captureStatus).toBe(status);
+    }
   });
 
   it("approve sets APPROVED with payer and shipTo", async () => {

@@ -59,8 +59,8 @@ export const orders = pgTable("orders", {
   shippedEmailSentAt: timestamp("shipped_email_sent_at", { withTimezone: true }),
   /** Set while a capture attempt is in flight; serialises concurrent completeCheckout calls. */
   captureStartedAt: timestamp("capture_started_at", { withTimezone: true }),
-  /** Paid order that needs the artist's attention. */
-  attention: text("attention", { enum: ["sold_twice", "amount_mismatch"] }),
+  /** Paid order that needs the artist's attention. Policy per value: src/lib/orders/attention.ts. */
+  attention: text("attention", { enum: ["sold_twice", "amount_mismatch", "payment_pending"] }),
 });
 
 export const settings = pgTable("settings", {

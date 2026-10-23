@@ -350,6 +350,42 @@ describe("checkout service", () => {
     await startCheckout(db, pp, { paintingId, item: "original" }, t0);
   });
 
+  for (const [kind, status] of [["capture-declined", "DECLINED"], ["capture-failed", "FAILED"]] as const) {
+    it(`a 2xx capture whose capture status is ${status} is a declined payment`, async () => {
+      const { db, pp, paintingId } = await setup();
+      const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+      await approve(db, pp, paypalOrderId, flShip);
+      pp.failNextCapture(kind);
+      await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "payment_failed");
+      expect(pp.captureCount(paypalOrderId)).toBe(1);
+      expect((await order(db, paypalOrderId)).status).toBe("failed");
+      expect(await painting(db, paintingId)).toMatchObject({ originalStatus: "for_sale", heldByOrderId: null });
+    });
+  }
+
+  it("a capture call that errors, where PayPal then shows the capture DECLINED, is declined", async () => {
+    const { db, pp, paintingId } = await setup();
+    const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+    await approve(db, pp, paypalOrderId, flShip);
+    pp.captureOrder = async (id) => {
+      Object.assign(pp.orders.get(id)!, { status: "COMPLETED", captureStatus: "DECLINED" });
+      throw new Error("timeout");
+    };
+    await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "payment_failed");
+    expect((await order(db, paypalOrderId)).status).toBe("failed");
+    expect((await painting(db, paintingId)).heldByOrderId).toBeNull();
+  });
+
+  it("a PENDING capture is recorded as paid and flagged payment_pending", async () => {
+    const { db, pp, paintingId } = await setup();
+    const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+    await approve(db, pp, paypalOrderId, flShip);
+    pp.failNextCapture("capture-pending");
+    const paid = await completeCheckout(db, pp, paypalOrderId, t0);
+    expect(paid).toMatchObject({ status: "paid", attention: "payment_pending" });
+    expect((await painting(db, paintingId)).originalStatus).toBe("sold");
+  });
+
   it("does not release the hold when PayPal's status cannot be confirmed", async () => {
     const { db, pp, paintingId } = await setup();
     const { paypalOrderId } = await startCheckout(db, pp, { paintingId, item: "original" }, t0);

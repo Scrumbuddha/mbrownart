@@ -1,7 +1,10 @@
 import type { ShipTo } from "@/lib/db/schema";
-import type { Amounts, PayPalApi, PayPalEnv, PayPalOrder, PayPalOrderStatus } from "./types";
+import type {
+  Amounts, PayPalApi, PayPalCaptureStatus, PayPalEnv, PayPalOrder, PayPalOrderStatus,
+} from "./types";
 
 const STATUSES: PayPalOrderStatus[] = ["CREATED", "APPROVED", "COMPLETED", "VOIDED", "PAYER_ACTION_REQUIRED"];
+const CAPTURE_STATUSES: PayPalCaptureStatus[] = ["COMPLETED", "PENDING", "DECLINED", "FAILED"];
 
 export class PayPalError extends Error {
   status: number;
@@ -63,7 +66,16 @@ function mapOrder(o: any): PayPalOrder {
     totalCents: toCents(unit?.amount?.value ?? captured),
     payer: o.payer?.email_address ? { name: payerName, email: o.payer.email_address } : null,
     shipTo,
+    captureStatus: captureStatusOf(unit?.payments?.captures?.[0]?.status),
   };
+}
+
+function captureStatusOf(raw: unknown): PayPalCaptureStatus | null {
+  if (raw === undefined || raw === null) return null;
+  if (CAPTURE_STATUSES.includes(raw as PayPalCaptureStatus)) return raw as PayPalCaptureStatus;
+  // The money was captured; a later refund is the artist's business in PayPal, not a failure.
+  if (raw === "REFUNDED" || raw === "PARTIALLY_REFUNDED") return "COMPLETED";
+  throw new PayPalError(`Unexpected PayPal capture status`, 200, String(raw));
 }
 
 async function issueOf(res: Response): Promise<string | null> {

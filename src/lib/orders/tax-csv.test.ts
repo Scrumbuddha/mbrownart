@@ -36,6 +36,8 @@ describe("taxCsv", () => {
     expect(taxCsv([order({ attention: "sold_twice" })], "2026-11")).toBe(`${HEADER}
 `);
     expect(taxCsv([order({ attention: "amount_mismatch" })], "2026-11")).toContain("2026-11-03");
+    // Tax was collected on a payment still clearing; under-reporting is the worse error.
+    expect(taxCsv([order({ attention: "payment_pending" })], "2026-11")).toContain("2026-11-03");
   });
   it("quotes a county containing a comma", () => {
     expect(taxCsv([order({ taxCounty: "Foo, Bar" })], "2026-11")).toContain('"Foo, Bar"');

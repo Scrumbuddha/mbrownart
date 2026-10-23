@@ -96,6 +96,15 @@ describe("markShipped email outcome and sold_twice", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect((await listPaidOrders(db)).find((r) => r.id === twice.id)!.shippedAt).toBeNull();
   });
+
+  it("refuses to ship while PayPal is still clearing the payment", async () => {
+    const { db, add } = await setup();
+    const pending = await add({ attention: "payment_pending", shippedAt: null });
+    const send = vi.fn().mockResolvedValue(undefined);
+    await markShipped(db, pending.id, new Date(), send);
+    expect(send).not.toHaveBeenCalled();
+    expect((await listPaidOrders(db))[0].shippedAt).toBeNull();
+  });
 });
 
 describe("resendShippedEmail", () => {

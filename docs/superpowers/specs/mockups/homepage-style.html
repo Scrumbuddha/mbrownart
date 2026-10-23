@@ -1,0 +1,67 @@
+<style>
+  .wc { border-radius: 2px; aspect-ratio: 4/5; }
+  .w1 { background: radial-gradient(circle at 30% 35%, #9cc9d9 0 22%, transparent 45%), radial-gradient(circle at 70% 65%, #f2b8a2 0 18%, transparent 42%), #fbf8f2; }
+  .w2 { background: radial-gradient(circle at 60% 30%, #b8d4a8 0 25%, transparent 50%), radial-gradient(circle at 35% 75%, #e7d38f 0 15%, transparent 40%), #fbf8f2; }
+  .w3 { background: radial-gradient(circle at 45% 50%, #c7b3dc 0 28%, transparent 55%), radial-gradient(circle at 80% 20%, #9cc9d9 0 10%, transparent 30%), #fbf8f2; }
+  .w4 { background: radial-gradient(circle at 25% 60%, #f2b8a2 0 20%, transparent 45%), radial-gradient(circle at 70% 35%, #b8d4a8 0 20%, transparent 45%), #fbf8f2; }
+  .site { background: #fff; color: #333; font-family: Georgia, serif; padding: 14px; border: 1px solid #e5e5e5; }
+  .site nav { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 12px; color: #555; }
+  .site .name { font-size: 15px; letter-spacing: .05em; color: #222; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .cap { font-size: 10px; color: #777; margin-top: 3px; }
+  .sold { color: #b04a3a; }
+  .hero { aspect-ratio: 16/8; }
+</style>
+
+<h2>Which homepage feels most like you?</h2>
+<p class="subtitle">The colored blobs stand in for your paintings. Click the one closest to what you picture; we can mix ideas.</p>
+
+<div class="cards">
+  <div class="card" data-choice="gallery" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="site">
+        <nav><span class="name">YOUR NAME</span><span>Paintings · Prints · About · Contact</span></nav>
+        <div class="grid">
+          <div><div class="wc w1"></div><div class="cap">Harbor Light · $420</div></div>
+          <div><div class="wc w2"></div><div class="cap">Spring Field · <span class="sold">Sold</span></div></div>
+          <div><div class="wc w3"></div><div class="cap">Lavender Dusk · $380</div></div>
+          <div><div class="wc w4"></div><div class="cap">Garden Path · $350</div></div>
+          <div><div class="wc w1"></div><div class="cap">Tide Pool · $290</div></div>
+          <div><div class="wc w2"></div><div class="cap">Meadow · print $45</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A. Gallery wall</h3><p>All your paintings up front in a clean grid with price or "Sold" under each. Fast to browse and shop.</p></div>
+  </div>
+
+  <div class="card" data-choice="featured" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="site">
+        <nav><span class="name">YOUR NAME</span><span>Shop · About · Contact</span></nav>
+        <div class="wc w3 hero"></div>
+        <div class="cap" style="text-align:center;margin:6px 0 10px">Lavender Dusk — watercolor on paper · $380</div>
+        <div class="grid">
+          <div class="wc w1"></div><div class="wc w2"></div><div class="wc w4"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B. One painting on stage</h3><p>A single large featured piece greets visitors, with the rest of the collection below. Feels more like a gallery opening.</p></div>
+  </div>
+
+  <div class="card" data-choice="story" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="site" style="background:#fbf8f2">
+        <nav><span class="name">YOUR NAME</span><span>Work · Shop · Studio</span></nav>
+        <div style="display:flex;gap:10px;align-items:center">
+          <div class="wc w4" style="flex:1"></div>
+          <div style="flex:1;font-size:11px;line-height:1.5">
+            <div style="font-size:14px;margin-bottom:6px">Painting the light along the coast</div>
+            A short note from you about your work, then the paintings follow…
+            <div style="margin-top:8px;display:inline-block;border:1px solid #333;padding:3px 8px">See the paintings</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C. Artist's story first</h3><p>Opens with you and a few words about your work, then leads into the paintings. Warmer, more personal.</p></div>
+  </div>
+</div>

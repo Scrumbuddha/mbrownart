@@ -7,3 +7,9 @@ export async function getSettings(db: Db): Promise<Settings> {
   if (!row) throw new Error("settings row missing");
   return row;
 }
+
+export async function updateSettings(db: Db, patch: Partial<Settings>): Promise<void> {
+  const { id: _id, ...fields } = patch;
+  if (Object.keys(fields).length === 0) return;
+  await db.update(settings).set(fields).where(eq(settings.id, 1));
+}

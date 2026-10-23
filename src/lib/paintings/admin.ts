@@ -36,7 +36,7 @@ const MAX_PRICE_CENTS = 100_000_000; // $1,000,000, safely inside int4
 const PRICE_FORMAT = "Enter the price as dollars, like 420 or 45.50.";
 
 /** "420", "1,200" or "45.50" -> cents. cents is null when blank. */
-function parsePrice(s: string): { cents: number | null } | { error: string } {
+export function parsePrice(s: string): { cents: number | null } | { error: string } {
   const t = s.replace(/[$\s]/g, "");
   if (t === "") return { cents: null };
   const m = /^(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/.exec(t);

@@ -2,7 +2,7 @@ import { requireStudio } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
 import { formatCents } from "@/lib/money";
 import { listPaidOrders, type PaidOrder } from "@/lib/orders/admin";
-import { ATTENTION_MESSAGES, canShip } from "@/lib/orders/attention";
+import { ATTENTION_MESSAGES, TEST_ORDER_LABEL, shipControl } from "@/lib/orders/attention";
 import { floridaDate } from "@/lib/orders/tax-csv";
 import { ResendButton } from "./ResendButton";
 import { ShippedCheckbox } from "./ShippedCheckbox";
@@ -11,10 +11,32 @@ export const dynamic = "force-dynamic";
 
 const card = { border: "1px solid #ddd", borderRadius: 6, padding: 16, marginBottom: 16 } as const;
 
+const note = { margin: "0 0 8px", color: "#777", fontSize: 15 } as const;
+
+function ShipArea({ o }: { o: PaidOrder }) {
+  switch (shipControl(o)) {
+    case "none":
+      return null;
+    case "mark_shipped":
+      return <ShippedCheckbox orderId={o.id} emailsBuyer={!!o.buyerEmail} />;
+    case "shipped":
+      return <p style={note}>Shipped {floridaDate(o.shippedAt!)}</p>;
+    case "resend_email":
+      return <><p style={note}>Shipped {floridaDate(o.shippedAt!)}</p><ResendButton orderId={o.id} /></>;
+    case "no_buyer_email":
+      return <><p style={note}>Shipped {floridaDate(o.shippedAt!)}</p><p style={note}>No buyer email on this order</p></>;
+  }
+}
+
 function OrderCard({ o }: { o: PaidOrder }) {
   const s = o.shipTo;
   return (
     <section style={{ ...card, ...(o.attention ? { border: "2px solid #b04a3a" } : {}) }}>
+      {o.paypalEnv === "sandbox" && (
+        <p style={{ display: "inline-block", background: "#eee", color: "#333", fontSize: 14, fontWeight: 500, padding: "4px 8px", borderRadius: 4, margin: "0 0 12px" }}>
+          {TEST_ORDER_LABEL}
+        </p>
+      )}
       {o.attention && (
         <p role="alert" style={{ background: "#fbeeea", color: "#b04a3a", fontWeight: 500, padding: 12, borderRadius: 4, margin: "0 0 12px" }}>
           {ATTENTION_MESSAGES[o.attention]}
@@ -39,14 +61,7 @@ function OrderCard({ o }: { o: PaidOrder }) {
         )}
         {o.buyerEmail && <><br /><span style={{ color: "#777" }}>{o.buyerEmail}</span></>}
       </p>
-      {!canShip(o) ? null : o.shippedAt ? (
-        <>
-          <p style={{ margin: "0 0 8px", color: "#777", fontSize: 15 }}>Shipped {floridaDate(o.shippedAt)}</p>
-          {!o.shippedEmailSentAt && <ResendButton orderId={o.id} />}
-        </>
-      ) : (
-        <ShippedCheckbox orderId={o.id} />
-      )}
+      <ShipArea o={o} />
     </section>
   );
 }

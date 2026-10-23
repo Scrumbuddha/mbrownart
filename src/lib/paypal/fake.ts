@@ -27,7 +27,7 @@ export type FakePayPal = PayPalApi & {
   setWebhookValid(valid: boolean): void;
 };
 
-export function createFakePayPal(): FakePayPal {
+export function createFakePayPal(opts: { mode?: "sandbox" | "live" } = {}): FakePayPal {
   const orders = new Map<string, PayPalOrder>();
   const captures = new Map<string, number>();
   let seq = 0;
@@ -42,6 +42,7 @@ export function createFakePayPal(): FakePayPal {
   const total = (a: Amounts) => a.itemCents + a.shippingCents + a.taxCents;
 
   return {
+    mode: opts.mode ?? "sandbox",
     orders,
     captures,
     captureCount: (id) => captures.get(id) ?? 0,

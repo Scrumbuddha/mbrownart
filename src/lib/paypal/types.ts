@@ -20,6 +20,8 @@ export type PayPalOrder = {
 };
 
 export interface PayPalApi {
+  /** Which PayPal environment this client talks to (from PAYPAL_ENV); sandbox orders are tests. */
+  readonly mode: "sandbox" | "live";
   createOrder(input: { referenceId: string; description: string } & Amounts): Promise<{ id: string }>;
   updateAmounts(paypalOrderId: string, a: Amounts): Promise<void>;
   captureOrder(paypalOrderId: string): Promise<PayPalOrder>;

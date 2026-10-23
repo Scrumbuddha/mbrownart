@@ -1,0 +1,1 @@
+ALTER TABLE "orders" ADD COLUMN "paypal_env" text DEFAULT 'live' NOT NULL;

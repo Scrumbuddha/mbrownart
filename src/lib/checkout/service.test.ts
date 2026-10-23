@@ -437,6 +437,16 @@ describe("checkout service", () => {
     }
   });
 
+  it("records which PayPal environment (sandbox or live) each order was placed in", async () => {
+    const { db, pp, paintingId } = await setup();
+    const a = await startCheckout(db, pp, { paintingId, item: "print" }, t0);
+    expect((await order(db, a.paypalOrderId)).paypalEnv).toBe("sandbox");
+    const other = await setup();
+    const live = createFakePayPal({ mode: "live" });
+    const b = await startCheckout(other.db, live, { paintingId: other.paintingId, item: "print" }, t0);
+    expect((await order(other.db, b.paypalOrderId)).paypalEnv).toBe("live");
+  });
+
   it("uses the shipping fee from settings", async () => {
     const { db, pp, paintingId } = await setup();
     await db.update(settings).set({ shippingCents: 1500 });
@@ -490,6 +500,20 @@ describe("recordPaidOrder after the painting was sold to someone else", () => {
     expect(await painting(db, paintingId)).toEqual(afterB);
     expect(afterB).toMatchObject({ originalStatus: "sold", heldByOrderId: null });
     expect(await order(db, bPaid.paypalOrderId!)).toMatchObject({ status: "paid", attention: null });
+  });
+
+  it("flags unavailable_paid, not sold_twice, when the original was set to not for sale", async () => {
+    const { db, pp, paintingId } = await setup();
+    const a = await startCheckout(db, pp, { paintingId, item: "original" }, t0);
+    await approve(db, pp, a.paypalOrderId, flShip);
+    pp.failNextCapture("declined");
+    await expectCode(completeCheckout(db, pp, a.paypalOrderId, t0), "payment_failed"); // hold released
+    await db.update(paintings).set({ originalStatus: "not_for_sale" }).where(eq(paintings.id, paintingId));
+
+    pp.orders.get(a.paypalOrderId)!.status = "COMPLETED"; // PayPal completes it anyway
+    const aPaid = await recordPaidOrder(db, await pp.getOrder(a.paypalOrderId), await order(db, a.paypalOrderId), at(MIN));
+    expect(aPaid).toMatchObject({ status: "paid", attention: "unavailable_paid" });
+    expect((await painting(db, paintingId)).originalStatus).toBe("not_for_sale");
   });
 
   it("rejects a PayPal order that belongs to a different order row", async () => {

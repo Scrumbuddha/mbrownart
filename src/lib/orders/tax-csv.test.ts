@@ -7,6 +7,7 @@ const order = (over: Partial<Order> = {}): Order => ({
   itemCents: 42000, shippingCents: 1000, taxCents: 3010, totalCents: 46010, taxCounty: "Pinellas",
   buyerName: "A", buyerEmail: "a@b.c", shipTo: null, createdAt: new Date(),
   paidAt: new Date("2026-11-03T17:00:00Z"), shippedAt: null, shippedEmailSentAt: null, captureStartedAt: null, attention: null,
+  paypalEnv: "live",
   ...over,
 });
 const HEADER = "date,county,taxable_amount,tax_collected";
@@ -38,6 +39,12 @@ describe("taxCsv", () => {
     expect(taxCsv([order({ attention: "amount_mismatch" })], "2026-11")).toContain("2026-11-03");
     // Tax was collected on a payment still clearing; under-reporting is the worse error.
     expect(taxCsv([order({ attention: "payment_pending" })], "2026-11")).toContain("2026-11-03");
+  });
+  it("excludes unavailable_paid orders (refunded) and sandbox test orders", () => {
+    expect(taxCsv([order({ attention: "unavailable_paid" })], "2026-11")).toBe(`${HEADER}\n`);
+    expect(taxCsv([order({ paypalEnv: "sandbox" })], "2026-11")).toBe(`${HEADER}\n`);
+    expect(taxCsv([order({ paypalEnv: "sandbox" }), order({ id: "2" })], "2026-11"))
+      .toBe(`${HEADER}\n2026-11-03,Pinellas,430.00,30.10\n`);
   });
   it("quotes a county containing a comma", () => {
     expect(taxCsv([order({ taxCounty: "Foo, Bar" })], "2026-11")).toContain('"Foo, Bar"');

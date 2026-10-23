@@ -106,7 +106,7 @@ Your site emails buyers when you mark an order shipped.
 
 ## Step 8. Go-live checklist (required, do not skip)
 
-Do all of this in **Sandbox** mode first (`PAYPAL_ENV` is `sandbox`). Use your sandbox buyer account to pay. Use test paintings you can delete afterwards.
+Do all of this in **Sandbox** mode first (`PAYPAL_ENV` is `sandbox`). Use your sandbox buyer account to pay. Use test paintings you can hide afterwards.
 
 1. **PayPal button, Pinellas.** On a painting page, click the PayPal button and log in with the sandbox buyer account. Set the shipping address to a Pinellas County ZIP, for example **33701** (St. Petersburg). Confirm the PayPal window shows **7% sales tax added BEFORE you press Pay** (6% state plus 1% county). Pay. Then confirm the painting shows **Sold**.
 2. **Debit or Credit Card button.** Do the same with another test painting using the **Debit or Credit Card** button (sandbox offers test card numbers under Testing Tools > Credit Card Generator). Confirm the tax appears **before** you pay. **If the card window does not show the tax, or the payment is refused, STOP. Do not go live. Get help from a developer or Claude first.**
@@ -121,12 +121,16 @@ Do all of this in **Sandbox** mode first (`PAYPAL_ENV` is `sandbox`). Use your s
 1. At developer.paypal.com, flip the toggle at the top to **Live**. Create a Live app and a Live webhook exactly as in Step 4 (same URL, same event).
 2. In Vercel (**Settings > Environment Variables**), replace `PAYPAL_CLIENT_ID`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and `PAYPAL_WEBHOOK_ID` with the **Live** values, and set `PAYPAL_ENV` to `live`. Set them for the **Production** environment (tick Production when saving). Replace all four together: a sandbox `PAYPAL_WEBHOOK_ID` with live keys makes webhooks fail, so payments will not be recorded properly.
 3. **Redeploy** (Step 7, item 1). Changed settings do nothing until you redeploy.
-4. Remove test paintings and orders you do not want public.
+4. Test orders stay in the Orders list, labelled **Test order (sandbox)**. They have no ship control and are **never counted in the tax report**, so you can leave them. Hide the test paintings: edit each one and click **Save as hidden**.
 5. Make one small real purchase (for example a print), confirm it appears in Studio Orders, then refund it in PayPal.
 
 ## Everyday use: the Orders page
 
 - **"Refund needed ..." banner**: rarely, two people pay for the same original at nearly the same time. The first buyer gets the painting. Open PayPal and refund the second buyer in full, then let them know.
+- **"Refund needed: this original was no longer for sale ..." banner**: someone paid for an original just as you set it to Not for sale. Refund the buyer in full in PayPal, then let them know. It has no ship control and is left out of the tax report.
+- **"PayPal is still clearing this payment ..." banner**: PayPal accepted the payment but has not finished clearing it (this can take a few days). **Do not ship yet.** The ship control appears by itself once PayPal reports the payment completed. If PayPal later shows it as denied, the buyer was not charged: do not ship.
+- **"Test order (sandbox)" label**: a purchase made while the site was in Sandbox mode. Nothing to ship, and it is never in the tax report.
+- **"No buyer email on this order"**: PayPal did not give us the buyer's email, so no shipped email can be sent. Let the buyer know another way if you need to.
 - **"Please check this payment in PayPal ..." banner**: the amount PayPal reports paid did not match the order. Open that payment in PayPal, compare it with the order, and sort it out there (refund, or contact the buyer). Hold off shipping until you are satisfied.
 - **Send email again**: if you mark an order shipped and the email fails, click this to try again.
 - **Download tax report**: choose a month and download a spreadsheet (CSV) of date, county, taxable amount and tax collected, for your Florida return.

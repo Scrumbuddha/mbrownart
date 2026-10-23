@@ -13,7 +13,10 @@ export type ShipState = { message?: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+class NoBuyerEmail extends Error {}
+
 async function sendFor(order: Order): Promise<void> {
+  if (!order.buyerEmail) throw new NoBuyerEmail("no buyer email");
   const db = getDb();
   const [painting] = await db.select().from(paintings).where(eq(paintings.id, order.paintingId));
   await sendShippedEmail(order, painting, await getSettings(db));
@@ -22,12 +25,14 @@ async function sendFor(order: Order): Promise<void> {
 /** Runs `run` with a send function that notes email failures. Logs the reason only, never the address or API key. */
 async function withEmailOutcome(run: (send: (o: Order) => Promise<void>) => Promise<void>): Promise<ShipState> {
   let emailFailed = false;
+  let noEmail = false;
   try {
     await run(async (order) => {
       try {
         await sendFor(order);
       } catch (e) {
-        console.error("Shipped email failed", e instanceof Error ? e.message : "unknown error");
+        if (e instanceof NoBuyerEmail) noEmail = true;
+        else console.error("Shipped email failed", e instanceof Error ? e.message : "unknown error");
         emailFailed = true;
         throw e;
       }
@@ -40,6 +45,7 @@ async function withEmailOutcome(run: (send: (o: Order) => Promise<void>) => Prom
   }
   revalidatePath("/studio/orders");
   // The order card also shows this, from the saved state, once the page refreshes.
+  if (noEmail) return { message: "Marked shipped. There's no buyer email on this order, so no email was sent." };
   return emailFailed ? { message: "Marked shipped, but the email to the buyer didn't send." } : {};
 }
 

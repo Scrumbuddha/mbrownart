@@ -29,6 +29,13 @@
       "when": 1792771315081,
       "tag": "0003_seed_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792774188860,
+      "tag": "0004_orders_paypal_env",
+      "breakpoints": true
     }
   ]
 }

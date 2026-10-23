@@ -123,6 +123,8 @@ export function createPayPalRest(env: PayPalEnv): PayPalApi {
   }
 
   return {
+    mode: env.mode,
+
     async createOrder(input) {
       const data = await call(
         "POST",

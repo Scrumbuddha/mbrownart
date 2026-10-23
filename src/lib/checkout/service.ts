@@ -148,7 +148,7 @@ export async function startCheckout(
 
   const { shippingCents } = await getSettings(db);
   const [o] = await db.insert(orders).values({
-    paintingId: p.id, item: input.item, status: "pending",
+    paintingId: p.id, item: input.item, status: "pending", paypalEnv: pp.mode,
     itemCents, shippingCents, taxCents: 0, totalCents: itemCents + shippingCents,
   }).returning();
 
@@ -270,7 +270,7 @@ const captureDeclined = (o: PayPalOrder) => o.captureStatus === "DECLINED" || o.
 /**
  * Marks the order paid (the money was taken, so this always happens) and, for an original,
  * marks the painting sold if it was still ours to sell. Otherwise flags the order
- * `sold_twice`; a capture PayPal is still clearing is flagged `payment_pending`; a captured
+ * `sold_twice` (sold to someone else) or `unavailable_paid` (no longer for sale); a capture PayPal is still clearing is flagged `payment_pending`; a captured
  * total that differs from ours is flagged `amount_mismatch`. Idempotent; shared with the webhook.
  */
 export async function recordPaidOrder(
@@ -299,8 +299,8 @@ export async function recordPaidOrder(
       return existing;
     }
 
-    // Most serious wins: sold_twice (refund owed), then payment_pending (don't ship yet), then
-    // amount_mismatch.
+    // Most serious wins: a refund owed (sold_twice / unavailable_paid), then payment_pending
+    // (don't ship yet), then amount_mismatch.
     let attention: Order["attention"] =
       paypalOrder.captureStatus === "PENDING" ? "payment_pending"
         : paypalOrder.totalCents !== paid.totalCents ? "amount_mismatch" : null;
@@ -313,7 +313,12 @@ export async function recordPaidOrder(
           or(isNull(paintings.heldByOrderId), eq(paintings.heldByOrderId, paid.id), lt(paintings.heldUntil, now)),
         ))
         .returning({ id: paintings.id });
-      if (sold.length === 0) attention = "sold_twice";
+      if (sold.length === 0) {
+        // Sold to someone else, or otherwise no longer ours to sell (e.g. set to not for sale).
+        const [p] = await tx.select({ status: paintings.originalStatus }).from(paintings)
+          .where(eq(paintings.id, paid.paintingId));
+        attention = p?.status === "sold" ? "sold_twice" : "unavailable_paid";
+      }
     }
     if (!attention) return paid;
     const [flagged] = await tx.update(orders).set({ attention }).where(eq(orders.id, paid.id)).returning();

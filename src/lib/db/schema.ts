@@ -60,7 +60,9 @@ export const orders = pgTable("orders", {
   /** Set while a capture attempt is in flight; serialises concurrent completeCheckout calls. */
   captureStartedAt: timestamp("capture_started_at", { withTimezone: true }),
   /** Paid order that needs the artist's attention. Policy per value: src/lib/orders/attention.ts. */
-  attention: text("attention", { enum: ["sold_twice", "amount_mismatch", "payment_pending"] }),
+  attention: text("attention", { enum: ["sold_twice", "unavailable_paid", "amount_mismatch", "payment_pending"] }),
+  /** PayPal environment the order was placed in; sandbox orders are test orders (never shipped or taxed). */
+  paypalEnv: text("paypal_env", { enum: ["sandbox", "live"] }).notNull().default("live"),
 });
 
 export const settings = pgTable("settings", {

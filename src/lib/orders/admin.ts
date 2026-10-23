@@ -16,8 +16,11 @@ export async function listPaidOrders(db: Db): Promise<PaidOrder[]> {
   return rows.map((r) => ({ ...r.order, paintingTitle: r.paintingTitle }));
 }
 
-// A refund is owed, or PayPal hasn't cleared the money: nothing to ship (see attention.ts).
-const shippable = or(isNull(orders.attention), notInArray(orders.attention, [...NO_SHIP_ATTENTION]));
+// Mirrors canShip in attention.ts: no refund owed, PayPal has cleared the money, not a sandbox test.
+const shippable = and(
+  or(isNull(orders.attention), notInArray(orders.attention, [...NO_SHIP_ATTENTION])),
+  eq(orders.paypalEnv, "live"),
+);
 
 /**
  * Marks a paid order shipped, then calls `send` and records shippedEmailSentAt when it succeeds.

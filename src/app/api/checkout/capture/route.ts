@@ -4,6 +4,8 @@ import { getPayPal } from "@/lib/paypal/server";
 import { handleCapture, errorResult, readJson } from "@/lib/checkout/handlers";
 
 export const runtime = "nodejs";
+// PayPal capture plus the follow-up order lookup can take a while; don't cut it off mid-payment.
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {

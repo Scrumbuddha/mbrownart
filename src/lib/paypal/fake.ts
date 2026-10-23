@@ -8,12 +8,15 @@ export type FakePayPal = PayPalApi & {
   captureCount(id: string): number;
   approve(id: string, shipTo: ShipTo): void;
   failNextCapture(kind: "declined" | "timeout-but-completed"): void;
+  /** Controls verifyWebhook's result (default true). */
+  setWebhookValid(valid: boolean): void;
 };
 
 export function createFakePayPal(): FakePayPal {
   const orders = new Map<string, PayPalOrder>();
   const captures = new Map<string, number>();
   let seq = 0;
+  let webhookValid = true;
   let nextFailure: "declined" | "timeout-but-completed" | null = null;
 
   const get = (id: string) => {
@@ -41,15 +44,12 @@ export function createFakePayPal(): FakePayPal {
     async captureOrder(id) {
       const o = get(id);
       captures.set(id, (captures.get(id) ?? 0) + 1);
+      if (o.status !== "APPROVED") throw new Error(`order ${id} is ${o.status}, not APPROVED`);
       const failure = nextFailure;
       nextFailure = null;
       if (failure === "declined") throw new Error("declined");
-      if (failure === "timeout-but-completed") {
-        o.status = "COMPLETED";
-        throw new Error("timeout");
-      }
-      if (o.status !== "APPROVED") throw new Error(`order ${id} is ${o.status}, not APPROVED`);
       o.status = "COMPLETED";
+      if (failure === "timeout-but-completed") throw new Error("timeout");
       return { ...o };
     },
 
@@ -58,11 +58,16 @@ export function createFakePayPal(): FakePayPal {
     },
 
     async verifyWebhook() {
-      return true;
+      return webhookValid;
+    },
+
+    setWebhookValid(valid) {
+      webhookValid = valid;
     },
 
     approve(id, shipTo) {
       const o = get(id);
+      if (o.status === "COMPLETED") throw new Error(`order ${id} is already COMPLETED`);
       o.status = "APPROVED";
       o.payer = { name: shipTo.name, email: "buyer@example.com" };
       o.shipTo = shipTo;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createPayPalRest } from "./rest";
+import { createPayPalRest, PayPalError } from "./rest";
 
 const env = { clientId: "id", clientSecret: "secret", mode: "sandbox" as const, webhookId: "WH-1" };
 
@@ -29,7 +29,7 @@ describe("createPayPalRest", () => {
     const call = fn.mock.calls.find(([u]) => String(u).endsWith("/v2/checkout/orders"))!;
     expect(String(call[0])).toBe("https://api-m.sandbox.paypal.com/v2/checkout/orders");
     const init = call[1] as RequestInit;
-    expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toBe("ref-1");
     const body = JSON.parse(init.body as string);
     expect(body.intent).toBe("CAPTURE");
     expect(body.payment_source.paypal.experience_context.shipping_preference).toBe("GET_FROM_FILE");
@@ -110,7 +110,8 @@ describe("createPayPalRest", () => {
     expect(o.totalCents).toBe(43000);
     const init = fn.mock.calls.find(([u]) => String(u).endsWith("/ORD1/capture"))![1] as RequestInit;
     expect(init.method).toBe("POST");
-    expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toBeTruthy();
+    expect((init.headers as Record<string, string>)["PayPal-Request-Id"]).toBe("capture-ORD1");
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("verifyWebhook returns true only on SUCCESS", async () => {
@@ -135,5 +136,71 @@ describe("createPayPalRest", () => {
     const err = await createPayPalRest(env).getOrder("ORD1").catch((e: Error) => e);
     expect((err as Error).message).toMatch(/422/);
     expect((err as Error).message).not.toContain("secret");
+  });
+});
+
+describe("createPayPalRest hardening", () => {
+  it("throws PayPalError with status and issue, without echoing the body", async () => {
+    mockFetch(() => json({ name: "UNPROCESSABLE_ENTITY", details: [{ issue: "INSTRUMENT_DECLINED" }], extra: "leak" }, 422));
+    const err = (await createPayPalRest(env).captureOrder("ORD1").catch((e) => e)) as PayPalError;
+    expect(err).toBeInstanceOf(PayPalError);
+    expect(err.status).toBe(422);
+    expect(err.issue).toBe("INSTRUMENT_DECLINED");
+    expect(err.message).not.toContain("leak");
+  });
+
+  it("falls back to the error name for issue, or null", async () => {
+    mockFetch(() => json({ name: "RESOURCE_NOT_FOUND" }, 404));
+    expect(((await createPayPalRest(env).getOrder("X").catch((e) => e)) as PayPalError).issue).toBe("RESOURCE_NOT_FOUND");
+    mockFetch(() => new Response("oops", { status: 500 }));
+    expect(((await createPayPalRest(env).getOrder("X").catch((e) => e)) as PayPalError).issue).toBeNull();
+  });
+
+  it("throws PayPalError on an unknown order status", async () => {
+    mockFetch(() => json({ id: "ORD1", status: "SAVED", purchase_units: [] }));
+    const err = (await createPayPalRest(env).getOrder("ORD1").catch((e) => e)) as PayPalError;
+    expect(err).toBeInstanceOf(PayPalError);
+    expect(err.issue).toBe("SAVED");
+  });
+
+  it("formats 5 cents as 0.05 and rejects bad cents", async () => {
+    const fn = mockFetch(() => json({ id: "O" }));
+    const api = createPayPalRest(env);
+    await api.createOrder({ referenceId: "r", description: "d", itemCents: 5, shippingCents: 0, taxCents: 0 });
+    const call = fn.mock.calls.find(([u]) => String(u).endsWith("/v2/checkout/orders"))!;
+    expect(JSON.parse((call[1] as RequestInit).body as string).purchase_units[0].amount.value).toBe("0.05");
+    await expect(
+      api.createOrder({ referenceId: "r", description: "d", itemCents: 1.5, shippingCents: 0, taxCents: 0 }),
+    ).rejects.toThrow(RangeError);
+    await expect(
+      api.createOrder({ referenceId: "r", description: "d", itemCents: -1, shippingCents: 0, taxCents: 0 }),
+    ).rejects.toThrow(RangeError);
+  });
+
+  it("refetches the token after it nears expiry", async () => {
+    vi.useFakeTimers();
+    try {
+      const fn = mockFetch(() => json({ id: "O" }));
+      const api = createPayPalRest(env);
+      const input = { referenceId: "r", description: "d", itemCents: 100, shippingCents: 0, taxCents: 0 };
+      const tokenCalls = () => fn.mock.calls.filter(([u]) => String(u).endsWith("/v1/oauth2/token")).length;
+      await api.createOrder(input);
+      vi.advanceTimersByTime((32400 - 61) * 1000);
+      await api.createOrder(input);
+      expect(tokenCalls()).toBe(1);
+      vi.advanceTimersByTime(2000);
+      await api.createOrder(input);
+      expect(tokenCalls()).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("verifyWebhook returns false on invalid JSON and ids are encoded in paths", async () => {
+    const fn = mockFetch(() => json({ id: "O", status: "CREATED", purchase_units: [] }));
+    const api = createPayPalRest(env);
+    expect(await api.verifyWebhook(new Headers(), "not json")).toBe(false);
+    await api.getOrder("a/b");
+    expect(fn.mock.calls.some(([u]) => String(u).endsWith("/v2/checkout/orders/a%2Fb"))).toBe(true);
   });
 });

@@ -13,6 +13,7 @@ import {
 
 export type SaveState = { errors?: Record<string, string>; message?: string; values?: Record<string, string> };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
 
 function revalidateSite(slugs: string[] = []) {
@@ -42,6 +43,7 @@ async function uploadPhoto(file: File): Promise<ProcessedImage> {
 export async function savePainting(_prev: SaveState, formData: FormData): Promise<SaveState> {
   await requireStudio();
   const id = String(formData.get("id") ?? "");
+  if (id && !UUID.test(id)) return { message: "That painting no longer exists." };
   const parsed = validatePaintingInput(formData);
   const photo = formData.get("photo");
   const file = photo instanceof File && photo.size > 0 ? photo : null;
@@ -78,14 +80,15 @@ export async function savePainting(_prev: SaveState, formData: FormData): Promis
 export async function moveAction(formData: FormData): Promise<void> {
   await requireStudio();
   const direction = formData.get("direction") === "up" ? "up" : "down";
-  const db = getDb();
-  await movePainting(db, String(formData.get("id") ?? ""), direction);
+  const id = String(formData.get("id") ?? "");
+  if (!UUID.test(id)) return;
+  await movePainting(getDb(), id, direction);
   revalidateSite();
 }
 
 export async function reorderAction(ids: string[]): Promise<void> {
   await requireStudio();
-  if (!Array.isArray(ids) || ids.some((i) => typeof i !== "string")) return;
+  if (!Array.isArray(ids) || ids.some((i) => typeof i !== "string" || !UUID.test(i))) return;
   await setOrder(getDb(), ids);
   revalidateSite();
 }

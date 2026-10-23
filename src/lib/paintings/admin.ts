@@ -32,13 +32,18 @@ const STATUSES = ["for_sale", "sold", "not_for_sale"] as const;
 
 const text = (raw: FormLike, name: string) => String(raw.get(name) ?? "").trim();
 
-/** "420" or "45.50" -> cents. null when blank, undefined when malformed. */
-function dollarsToCents(s: string): number | null | undefined {
-  const t = s.replace(/[$,\s]/g, "");
-  if (t === "") return null;
-  const m = /^(\d+)(?:\.(\d{1,2}))?$/.exec(t);
-  if (!m) return undefined;
-  return Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0") || 0);
+const MAX_PRICE_CENTS = 100_000_000; // $1,000,000, safely inside int4
+const PRICE_FORMAT = "Enter the price as dollars, like 420 or 45.50.";
+
+/** "420", "1,200" or "45.50" -> cents. cents is null when blank. */
+function parsePrice(s: string): { cents: number | null } | { error: string } {
+  const t = s.replace(/[$\s]/g, "");
+  if (t === "") return { cents: null };
+  const m = /^(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/.exec(t);
+  if (!m) return { error: PRICE_FORMAT };
+  const cents = Number(m[1].replace(/,/g, "")) * 100 + Number((m[2] ?? "").padEnd(2, "0") || 0);
+  if (cents >= MAX_PRICE_CENTS) return { error: "Please enter a price under $1,000,000." };
+  return { cents };
 }
 
 export function validatePaintingInput(raw: FormLike): ValidationResult {
@@ -59,12 +64,12 @@ export function validatePaintingInput(raw: FormLike): ValidationResult {
     else errors.year = "Enter the year as four digits, like 2024.";
   }
 
-  const originalParsed = dollarsToCents(text(raw, "originalPrice"));
+  const originalParsed = parsePrice(text(raw, "originalPrice"));
   let originalPriceCents: number | null = null;
-  if (originalParsed === undefined) {
-    errors.originalPriceCents = "Enter the price as dollars, like 420 or 45.50.";
+  if ("error" in originalParsed) {
+    errors.originalPriceCents = originalParsed.error;
   } else {
-    originalPriceCents = originalParsed;
+    originalPriceCents = originalParsed.cents;
     if (originalStatus === "for_sale" && !(originalPriceCents && originalPriceCents > 0)) {
       errors.originalPriceCents = "Enter a price above $0 for a painting that is for sale.";
     }
@@ -76,13 +81,13 @@ export function validatePaintingInput(raw: FormLike): ValidationResult {
   if (printEnabled) {
     printSize = text(raw, "printSize") || null;
     if (!printSize) errors.printSize = "Enter the print size, like 8x10.";
-    const parsed = dollarsToCents(text(raw, "printPrice"));
-    if (parsed === undefined) {
-      errors.printPriceCents = "Enter the price as dollars, like 45 or 45.50.";
-    } else if (!(parsed && parsed > 0)) {
+    const parsed = parsePrice(text(raw, "printPrice"));
+    if ("error" in parsed) {
+      errors.printPriceCents = parsed.error;
+    } else if (!(parsed.cents && parsed.cents > 0)) {
       errors.printPriceCents = "Enter a print price above $0.";
     } else {
-      printPriceCents = parsed;
+      printPriceCents = parsed.cents;
     }
   }
 
@@ -118,11 +123,11 @@ async function uniqueSlug(db: Db, title: string): Promise<string> {
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
 }
 
+// A blank year keeps the stored one on edit (see updatePainting) and defaults to this year on create.
 const fields = (input: PaintingInput) => ({
   title: input.title,
   medium: input.medium,
   size: input.size,
-  year: input.year ?? new Date().getFullYear(),
   description: input.description,
   originalStatus: input.originalStatus,
   originalPriceCents: input.originalPriceCents,
@@ -148,7 +153,7 @@ export async function createPainting(
   const slug = await uniqueSlug(db, input.title);
   const [{ lowest }] = await db.select({ lowest: min(paintings.sortOrder) }).from(paintings);
   const [row] = await db.insert(paintings).values({
-    ...fields(input), ...image, slug, sortOrder: (lowest ?? 0) - 1,
+    ...fields(input), year: input.year ?? new Date().getFullYear(), ...image, slug, sortOrder: (lowest ?? 0) - 1,
   }).returning();
   return row;
 }
@@ -158,16 +163,29 @@ export async function updatePainting(
   db: Db, id: string, input: PaintingInput, image?: ProcessedImage,
 ): Promise<Painting | null> {
   const [row] = await db.update(paintings)
-    .set({ ...fields(input), ...(image ?? {}), updatedAt: new Date() })
+    .set({ ...fields(input), ...(input.year == null ? {} : { year: input.year }), ...(image ?? {}), updatedAt: new Date() })
     .where(eq(paintings.id, id)).returning();
   return row ?? null;
 }
 
-/** Writes sort order = position in `ids`. Paintings not listed are left alone. */
+/**
+ * Writes sort order 0..n-1 following `ids`. Unknown and repeated ids are dropped,
+ * and paintings left out of the list keep their current relative order after it.
+ */
 export async function setOrder(db: Db, ids: string[]): Promise<void> {
   await db.transaction(async (tx) => {
-    for (let i = 0; i < ids.length; i++) {
-      await tx.update(paintings).set({ sortOrder: i }).where(eq(paintings.id, ids[i]));
+    const current = (await listAllPaintings(tx)).map((p) => p.id);
+    const known = new Set(current);
+    const seen = new Set<string>();
+    const final: string[] = [];
+    for (const id of [...ids, ...current]) {
+      if (known.has(id) && !seen.has(id)) {
+        seen.add(id);
+        final.push(id);
+      }
+    }
+    for (let i = 0; i < final.length; i++) {
+      await tx.update(paintings).set({ sortOrder: i }).where(eq(paintings.id, final[i]));
     }
   });
 }

@@ -19,6 +19,9 @@ export type FormPainting = {
   visible: boolean;
 };
 
+const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
+const TOO_BIG = "That photo is too big. Please choose one under 20 MB.";
+
 const dollars = (cents: number | null) =>
   cents == null ? "" : (cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2));
 
@@ -40,7 +43,8 @@ export function PaintingForm({ painting }: { painting?: FormPainting }) {
     (state.values?.originalStatus as FormPainting["originalStatus"] | undefined) ?? painting?.originalStatus ?? "for_sale",
   );
   const [printOn, setPrintOn] = useState(painting?.printEnabled ?? false);
-  const errors = state.errors ?? {};
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const errors: Record<string, string> = { ...(state.errors ?? {}), ...(photoError ? { photo: photoError } : {}) };
   const v = (name: string, fallback: string | number | null | undefined) =>
     state.values?.[name] ?? (fallback == null ? "" : String(fallback));
 
@@ -63,7 +67,8 @@ export function PaintingForm({ painting }: { painting?: FormPainting }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={painting.imageUrl} alt="" style={{ display: "block", maxWidth: 160, maxHeight: 160, marginBottom: 10 }} />
         )}
-        <input id="photo" name="photo" type="file" accept="image/*" style={{ fontSize: 16, maxWidth: "100%" }} {...invalid("photo")} />
+        <input id="photo" name="photo" type="file" accept="image/*"
+          onChange={(e) => setPhotoError((e.target.files?.[0]?.size ?? 0) > MAX_PHOTO_BYTES ? TOO_BIG : null)} style={{ fontSize: 16, maxWidth: "100%" }} {...invalid("photo")} />
         {err("photo")}
       </div>
 
@@ -148,14 +153,19 @@ export function PaintingForm({ painting }: { painting?: FormPainting }) {
         </div>
       )}
 
+      {state.errors && !photoError && (
+        <p style={{ color: "#777", fontSize: 14, margin: "0 0 12px" }}>
+          Please choose the photo again before you save, as the form cannot keep it.
+        </p>
+      )}
       {state.message && <p role="alert" style={errorStyle}>{state.message}</p>}
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
-        <button type="submit" name="visible" value="true" disabled={pending}
+        <button type="submit" name="visible" value="true" disabled={pending || !!photoError}
           style={{ ...button, background: "#222", color: "#fff", border: 0 }}>
           {pending ? "Saving..." : "Publish"}
         </button>
-        <button type="submit" name="visible" value="false" disabled={pending}
+        <button type="submit" name="visible" value="false" disabled={pending || !!photoError}
           style={{ ...button, background: "#fff", color: "#222", border: "1px solid #999" }}>
           Save as hidden
         </button>

@@ -4,7 +4,8 @@ import { createTestDb } from "../db/test-db";
 import { orders, paintings, type ShipTo } from "../db/schema";
 import { createFakePayPal } from "../paypal/fake";
 import { completeCheckout, startCheckout } from "./service";
-import { handleWebhookEvent } from "./webhook";
+import { handleWebhookEvent, handleWebhookRequest } from "./webhook";
+import { vi } from "vitest";
 
 const base = {
   slug: "harbor", title: "Harbor", medium: "Watercolor", size: "11x14", year: 2024,
@@ -54,5 +55,56 @@ describe("handleWebhookEvent", () => {
   it("propagates a non-completed PayPal order so the webhook can be retried", async () => {
     const { db, pp, paypalOrderId } = await setup();
     await expect(handleWebhookEvent(db, pp, evt(paypalOrderId), now)).rejects.toThrow();
+  });
+});
+
+describe("handleWebhookRequest", () => {
+  const headers = new Headers();
+  const raw = (orderId: string, type = "PAYMENT.CAPTURE.COMPLETED") => JSON.stringify({ id: "WH-1", ...evt(orderId, type) });
+
+  it("rejects an invalid signature with 400 and touches nothing", async () => {
+    const { db, pp, p, paypalOrderId } = await setup();
+    pp.orders.get(paypalOrderId)!.status = "COMPLETED";
+    const getOrder = vi.spyOn(pp, "getOrder");
+    pp.setWebhookValid(false);
+    const r = await handleWebhookRequest(db, pp, headers, raw(paypalOrderId), now);
+    expect(r.status).toBe(400);
+    expect(getOrder).not.toHaveBeenCalled();
+    const [o] = await db.select().from(orders).where(eq(orders.paypalOrderId, paypalOrderId));
+    expect(o.status).toBe("pending");
+    const [row] = await db.select().from(paintings).where(eq(paintings.id, p.id));
+    expect(row.originalStatus).toBe("for_sale");
+  });
+
+  it("returns 200 for a valid non-capture event", async () => {
+    const { db, pp, paypalOrderId } = await setup();
+    expect((await handleWebhookRequest(db, pp, headers, raw(paypalOrderId, "CHECKOUT.ORDER.APPROVED"), now)).status).toBe(200);
+  });
+
+  it("returns 200 and records a valid capture event", async () => {
+    const { db, pp, paypalOrderId } = await setup();
+    pp.orders.get(paypalOrderId)!.status = "COMPLETED";
+    expect((await handleWebhookRequest(db, pp, headers, raw(paypalOrderId), now)).status).toBe(200);
+    const [o] = await db.select().from(orders).where(eq(orders.paypalOrderId, paypalOrderId));
+    expect(o.status).toBe("paid");
+  });
+
+  it("returns 500 (so PayPal retries) when PayPal's order id does not match, logging ids but no PII", async () => {
+    const { db, pp, paypalOrderId } = await setup();
+    const real = pp.orders.get(paypalOrderId)!;
+    vi.spyOn(pp, "getOrder").mockResolvedValue({ ...real, id: "OTHER", status: "COMPLETED" });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const r = await handleWebhookRequest(db, pp, headers, raw(paypalOrderId), now);
+    expect(r.status).toBe(500);
+    const logged = JSON.stringify(log.mock.calls);
+    expect(logged).toContain("WH-1");
+    expect(logged).toContain("PAYMENT.CAPTURE.COMPLETED");
+    expect(logged).not.toContain("buyer@example.com");
+    log.mockRestore();
+  });
+
+  it("returns 400 for unparseable JSON", async () => {
+    const { db, pp } = await setup();
+    expect((await handleWebhookRequest(db, pp, headers, "{nope", now)).status).toBe(400);
   });
 });

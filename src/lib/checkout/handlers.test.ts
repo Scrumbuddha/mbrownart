@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTestDb } from "../db/test-db";
-import { paintings, type ShipTo } from "../db/schema";
+import { eq } from "drizzle-orm";
+import { orders, paintings, type ShipTo } from "../db/schema";
 import { createFakePayPal } from "../paypal/fake";
 import { CHECKOUT_MESSAGES } from "./errors";
 import { handleCapture, handleCreate, handleShipping } from "./handlers";
@@ -63,5 +64,18 @@ describe("checkout handlers", () => {
     expect(boom).toEqual({ status: 500, body: generic.body });
     expect(log).toHaveBeenCalledTimes(1);
     log.mockRestore();
+  });
+});
+
+describe("in_progress mapping", () => {
+  it("maps an in-flight capture to 409 in_progress", async () => {
+    const { db, pp, id } = await setup();
+    const c = await handleCreate(db, pp, { paintingId: id, item: "original" }, now);
+    const { paypalOrderId } = c.body as { paypalOrderId: string };
+    pp.approve(paypalOrderId, ship);
+    await db.update(orders).set({ captureStartedAt: now }).where(eq(orders.paypalOrderId, paypalOrderId));
+    const r = await handleCapture(db, pp, { paypalOrderId }, now);
+    expect(r.status).toBe(409);
+    expect(r.body).toEqual({ code: "in_progress", message: CHECKOUT_MESSAGES.in_progress });
   });
 });

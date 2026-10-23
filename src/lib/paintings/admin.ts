@@ -1,4 +1,4 @@
-import { asc, desc, eq, like, min, or } from "drizzle-orm";
+import { and, asc, desc, eq, like, min, ne, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { paintings, type Painting } from "../db/schema";
 
@@ -158,14 +158,35 @@ export async function createPainting(
   return row;
 }
 
-/** Keeps the slug, sort order and any checkout hold. Returns null if the painting is gone. */
+/** The edit form's hidden `loadedStatus` field; null when missing or not a known status. */
+export function loadedStatusOf(raw: FormLike): Painting["originalStatus"] | null {
+  const s = raw.get("loadedStatus");
+  return STATUSES.find((x) => x === s) ?? null;
+}
+
+export const JUST_SOLD = "This painting just sold. Reload the page to see the latest.";
+
+export type UpdatePaintingResult =
+  | { ok: true; painting: Painting }
+  | { ok: false; error: "not_found" | "just_sold" };
+
+/**
+ * Keeps the slug, sort order and any checkout hold. `loadedStatus` is the original's status the
+ * edit form was loaded with: if the painting has sold since (a buyer paid while the form was
+ * open), nothing is saved, so a stale form can never turn a sold original back to for sale.
+ */
 export async function updatePainting(
-  db: Db, id: string, input: PaintingInput, image?: ProcessedImage,
-): Promise<Painting | null> {
+  db: Db, id: string, input: PaintingInput,
+  opts: { loadedStatus: Painting["originalStatus"] | null; image?: ProcessedImage },
+): Promise<UpdatePaintingResult> {
+  const notSoldSinceLoad = opts.loadedStatus === "sold" ? undefined : ne(paintings.originalStatus, "sold");
   const [row] = await db.update(paintings)
-    .set({ ...fields(input), ...(input.year == null ? {} : { year: input.year }), ...(image ?? {}), updatedAt: new Date() })
-    .where(eq(paintings.id, id)).returning();
-  return row ?? null;
+    .set({
+      ...fields(input), ...(input.year == null ? {} : { year: input.year }), ...(opts.image ?? {}), updatedAt: new Date(),
+    })
+    .where(and(eq(paintings.id, id), notSoldSinceLoad)).returning();
+  if (row) return { ok: true, painting: row };
+  return { ok: false, error: (await getPaintingById(db, id)) ? "just_sold" : "not_found" };
 }
 
 /**

@@ -71,6 +71,8 @@ export function PaintingForm({ painting }: { painting?: FormPainting }) {
   return (
     <form onSubmit={onSubmit}>
       {painting && <input type="hidden" name="id" value={painting.id} />}
+      {/* What the original's status was when this form loaded; the save refuses if it has sold since. */}
+      {painting && <input type="hidden" name="loadedStatus" value={painting.originalStatus} />}
 
       <div style={field}>
         <label htmlFor="photo" style={label}>

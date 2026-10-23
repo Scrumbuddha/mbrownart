@@ -3,7 +3,7 @@ import { paintings } from "../db/schema";
 import { createTestDb } from "../db/test-db";
 import { listGallery } from "./queries";
 import {
-  createPainting, getPaintingById, listAllPaintings, movePainting, setOrder,
+  JUST_SOLD, createPainting, getPaintingById, listAllPaintings, loadedStatusOf, movePainting, setOrder,
   updatePainting, validatePaintingInput, type PaintingInput, type ProcessedImage,
 } from "./admin";
 
@@ -126,18 +126,57 @@ describe("admin persistence", () => {
   it("updatePainting keeps the stored year when the year is blank", async () => {
     const db = await createTestDb();
     const p = await createPainting(db, input({ year: 2019 }), img);
-    const u = await updatePainting(db, p.id, input({ year: null }));
-    expect(u?.year).toBe(2019);
+    const u = await saved(updatePainting(db, p.id, input({ year: null }), { loadedStatus: "for_sale" }));
+    expect(u.year).toBe(2019);
   });
   it("updatePainting keeps slug, image and checkout hold; replaces image when given", async () => {
     const db = await createTestDb();
     const p = await createPainting(db, input(), img);
     const until = new Date(Date.now() + 60000);
     await db.update(paintings).set({ heldUntil: until }).execute();
-    const u = await updatePainting(db, p.id, input({ title: "Renamed", visible: false }));
+    const u = await saved(updatePainting(db, p.id, input({ title: "Renamed", visible: false }), { loadedStatus: "for_sale" }));
     expect(u).toMatchObject({ slug: "harbor-light", title: "Renamed", visible: false, imageUrl: "w" });
-    expect(u?.heldUntil?.getTime()).toBe(until.getTime());
-    const u2 = await updatePainting(db, p.id, input(), { ...img, imageUrl: "new" });
-    expect(u2?.imageUrl).toBe("new");
+    expect(u.heldUntil?.getTime()).toBe(until.getTime());
+    const u2 = await saved(updatePainting(db, p.id, input(), { loadedStatus: "for_sale", image: { ...img, imageUrl: "new" } }));
+    expect(u2.imageUrl).toBe("new");
+  });
+  it("updatePainting reports a painting that no longer exists", async () => {
+    const db = await createTestDb();
+    const r = await updatePainting(db, "00000000-0000-4000-8000-000000000000", input(), { loadedStatus: "for_sale" });
+    expect(r).toEqual({ ok: false, error: "not_found" });
   });
 });
+
+describe("updatePainting from a stale edit form", () => {
+  for (const loadedStatus of ["for_sale", "not_for_sale", null] as const) {
+    it(`refuses to save anything when the painting sold after the form loaded (${loadedStatus})`, async () => {
+      const db = await createTestDb();
+      const p = await createPainting(db, input(), img);
+      await db.update(paintings).set({ originalStatus: "sold" }).execute(); // a buyer paid meanwhile
+      const r = await updatePainting(db, p.id, input({ title: "Renamed", originalStatus: "for_sale" }), { loadedStatus });
+      expect(r).toEqual({ ok: false, error: "just_sold" });
+      expect(await getPaintingById(db, p.id)).toMatchObject({ originalStatus: "sold", title: "Harbor Light" });
+    });
+  }
+
+  it("reads the form's loadedStatus, treating anything unknown as not sold", () => {
+    expect(loadedStatusOf(form({ loadedStatus: "sold" }))).toBe("sold");
+    expect(loadedStatusOf(form({ loadedStatus: "for_sale" }))).toBe("for_sale");
+    expect(loadedStatusOf(form({ loadedStatus: "SOLD" }))).toBeNull();
+    expect(loadedStatusOf(form({}))).toBeNull();
+    expect(JUST_SOLD).toBe("This painting just sold. Reload the page to see the latest.");
+  });
+
+  it("saves normally when the form loaded the painting as sold", async () => {
+    const db = await createTestDb();
+    const p = await createPainting(db, input({ originalStatus: "sold" }), img);
+    const u = await saved(updatePainting(db, p.id, input({ title: "Renamed", originalStatus: "not_for_sale" }), { loadedStatus: "sold" }));
+    expect(u).toMatchObject({ title: "Renamed", originalStatus: "not_for_sale" });
+  });
+});
+
+async function saved(r: ReturnType<typeof updatePainting>) {
+  const out = await r;
+  if (!out.ok) throw new Error(`expected a saved painting, got ${out.error}`);
+  return out.painting;
+}

@@ -9,7 +9,7 @@ import { discardUpload, withUploadedPhoto } from "@/lib/images/from-upload";
 import { UploadError, processUpload } from "@/lib/images/process";
 import { isBlobUploadUrl } from "@/lib/images/upload-policy";
 import {
-  createPainting, movePainting, setOrder, updatePainting,
+  JUST_SOLD, createPainting, loadedStatusOf, movePainting, setOrder, updatePainting,
   validatePaintingInput, type ProcessedImage,
 } from "@/lib/paintings/admin";
 
@@ -27,7 +27,7 @@ function revalidateSite(slugs: string[] = []) {
 // React clears the form after an action, so send the typed text back to refill it.
 function echo(formData: FormData): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [k, v] of formData.entries()) if (typeof v === "string" && k !== "id" && k !== "photoUrl") out[k] = v;
+  for (const [k, v] of formData.entries()) if (typeof v === "string" && k !== "id" && k !== "photoUrl" && k !== "loadedStatus") out[k] = v;
   return out;
 }
 
@@ -72,9 +72,13 @@ export async function savePainting(_prev: SaveState, formData: FormData): Promis
 
   const db = getDb();
   if (id) {
-    const saved = await updatePainting(db, id, parsed.value, image);
-    if (!saved) return { message: "That painting no longer exists." };
-    revalidateSite([saved.slug]);
+    const saved = await updatePainting(db, id, parsed.value, { image, loadedStatus: loadedStatusOf(formData) });
+    if (!saved.ok) {
+      return saved.error === "just_sold"
+        ? { message: JUST_SOLD, values: echo(formData) }
+        : { message: "That painting no longer exists." };
+    }
+    revalidateSite([saved.painting.slug]);
   } else {
     if (!image) return { errors: { photo: "Please choose a photo of the painting." } };
     const created = await createPainting(db, parsed.value, image);

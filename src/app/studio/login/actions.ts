@@ -21,6 +21,10 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
   if (!result.ok) {
     if (result.error === "misconfigured") {
       console.error("Studio login disabled: STUDIO_PASSWORD missing or SESSION_SECRET missing/under 32 characters.");
+      return {
+        error:
+          "Studio sign-in isn't set up on this site yet. In Vercel, check STUDIO_PASSWORD and SESSION_SECRET (32+ characters) for this environment, then redeploy.",
+      };
     }
     return {
       error:

@@ -1,7 +1,9 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useState, useTransition, type FormEvent } from "react";
+import { MAX_PHOTO_BYTES, TOO_BIG } from "@/lib/images/upload-policy";
 import { savePainting, type SaveState } from "../paintings/actions";
+import { uploadChosenPhoto } from "./upload-photo";
 
 export type FormPainting = {
   id: string;
@@ -18,9 +20,6 @@ export type FormPainting = {
   printPriceCents: number | null;
   visible: boolean;
 };
-
-const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
-const TOO_BIG = "That photo is too big. Please choose one under 20 MB.";
 
 const dollars = (cents: number | null) =>
   cents == null ? "" : (cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2));
@@ -44,6 +43,20 @@ export function PaintingForm({ painting }: { painting?: FormPainting }) {
   );
   const [printOn, setPrintOn] = useState(painting?.printEnabled ?? false);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [, startTransition] = useTransition();
+  const busy = pending || uploading;
+
+  // Upload the photo from the browser straight to Blob first, then send the form with its URL.
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget, (e.nativeEvent as SubmitEvent).submitter);
+    setUploading(true);
+    const problem = await uploadChosenPhoto(fd, "photo");
+    setUploading(false);
+    if (problem) return setPhotoError(problem);
+    startTransition(() => action(fd));
+  };
   const errors: Record<string, string> = { ...(state.errors ?? {}), ...(photoError ? { photo: photoError } : {}) };
   const v = (name: string, fallback: string | number | null | undefined) =>
     state.values?.[name] ?? (fallback == null ? "" : String(fallback));
@@ -56,7 +69,7 @@ export function PaintingForm({ painting }: { painting?: FormPainting }) {
   });
 
   return (
-    <form action={action}>
+    <form onSubmit={onSubmit}>
       {painting && <input type="hidden" name="id" value={painting.id} />}
 
       <div style={field}>
@@ -161,11 +174,11 @@ export function PaintingForm({ painting }: { painting?: FormPainting }) {
       {state.message && <p role="alert" style={errorStyle}>{state.message}</p>}
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
-        <button type="submit" name="visible" value="true" disabled={pending || !!photoError}
+        <button type="submit" name="visible" value="true" disabled={busy || !!photoError}
           style={{ ...button, background: "#222", color: "#fff", border: 0 }}>
-          {pending ? "Saving..." : "Publish"}
+          {uploading ? "Uploading photo..." : pending ? "Saving..." : "Publish"}
         </button>
-        <button type="submit" name="visible" value="false" disabled={pending || !!photoError}
+        <button type="submit" name="visible" value="false" disabled={busy || !!photoError}
           style={{ ...button, background: "#fff", color: "#222", border: "1px solid #999" }}>
           Save as hidden
         </button>

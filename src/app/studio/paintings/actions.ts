@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireStudio } from "@/lib/auth/session";
 import { getDb } from "@/lib/db/client";
+import { discardUpload, withUploadedPhoto } from "@/lib/images/from-upload";
 import { UploadError, processUpload } from "@/lib/images/process";
+import { isBlobUploadUrl } from "@/lib/images/upload-policy";
 import {
   createPainting, movePainting, setOrder, updatePainting,
   validatePaintingInput, type ProcessedImage,
@@ -14,7 +16,6 @@ import {
 export type SaveState = { errors?: Record<string, string>; message?: string; values?: Record<string, string> };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_PHOTO_BYTES = 20 * 1024 * 1024;
 
 function revalidateSite(slugs: string[] = []) {
   revalidatePath("/");
@@ -26,12 +27,13 @@ function revalidateSite(slugs: string[] = []) {
 // React clears the form after an action, so send the typed text back to refill it.
 function echo(formData: FormData): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [k, v] of formData.entries()) if (typeof v === "string" && k !== "id") out[k] = v;
+  for (const [k, v] of formData.entries()) if (typeof v === "string" && k !== "id" && k !== "photoUrl") out[k] = v;
   return out;
 }
 
-async function uploadPhoto(file: File): Promise<ProcessedImage> {
-  const { web, large, width, height } = await processUpload(Buffer.from(await file.arrayBuffer()));
+/** Processes the photo the browser uploaded to Blob into the stored versions; the raw upload is deleted. */
+async function storePhoto(photo: Buffer): Promise<ProcessedImage> {
+  const { web, large, width, height } = await processUpload(photo);
   const opts = { access: "public", addRandomSuffix: true, contentType: "image/jpeg" } as const;
   const [w, l] = await Promise.all([
     put("paintings/web.jpg", web, opts),
@@ -45,21 +47,25 @@ export async function savePainting(_prev: SaveState, formData: FormData): Promis
   const id = String(formData.get("id") ?? "");
   if (id && !UUID.test(id)) return { message: "That painting no longer exists." };
   const parsed = validatePaintingInput(formData);
-  const photo = formData.get("photo");
-  const file = photo instanceof File && photo.size > 0 ? photo : null;
+  // The browser uploads the photo straight to Blob (see upload-photo.ts) and sends its URL.
+  const photoUrl = formData.get("photoUrl");
+  const hasPhoto = typeof photoUrl === "string" && photoUrl !== "";
 
   const errors: Record<string, string> = parsed.ok ? {} : { ...parsed.errors };
-  if (!id && !file) errors.photo = "Please choose a photo of the painting.";
-  if (file && file.size > MAX_PHOTO_BYTES) errors.photo = "That photo is too big. Please choose one under 20 MB.";
-  if (!parsed.ok || Object.keys(errors).length > 0) return { errors, values: echo(formData) };
+  if (!id && !hasPhoto) errors.photo = "Please choose a photo of the painting.";
+  if (hasPhoto && !isBlobUploadUrl(photoUrl)) errors.photo = "The photo didn't upload. Please try again.";
+  if (!parsed.ok || Object.keys(errors).length > 0) {
+    await discardUpload(photoUrl);
+    return { errors, values: echo(formData) };
+  }
 
   let image: ProcessedImage | undefined;
-  if (file) {
+  if (hasPhoto) {
     try {
-      image = await uploadPhoto(file);
+      image = await withUploadedPhoto(photoUrl, storePhoto);
     } catch (e) {
       if (e instanceof UploadError) return { errors: { photo: e.message }, values: echo(formData) };
-      console.error("Photo upload failed", e);
+      console.error("Photo upload failed", e instanceof Error ? e.message : "unknown error");
       return { message: "The photo didn't upload. Please try again.", values: echo(formData) };
     }
   }

@@ -1,7 +1,9 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState, useTransition, type FormEvent } from "react";
 import type { Settings } from "@/lib/db/schema";
+import { MAX_PHOTO_BYTES, TOO_BIG } from "@/lib/images/upload-policy";
+import { uploadChosenPhoto } from "../_components/upload-photo";
 import { saveSettings, type SettingsState } from "./actions";
 
 const input = {
@@ -16,7 +18,22 @@ const dollars = (cents: number) => (cents % 100 === 0 ? String(cents / 100) : (c
 
 export function SettingsForm({ settings }: { settings: Settings }) {
   const [state, action, pending] = useActionState<SettingsState, FormData>(saveSettings, {});
-  const errors = state.errors ?? {};
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [, startTransition] = useTransition();
+  const busy = pending || uploading;
+  const errors: Record<string, string> = { ...(state.errors ?? {}), ...(photoError ? { aboutPhoto: photoError } : {}) };
+
+  // Upload the photo from the browser straight to Blob first, then send the form with its URL.
+  const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    setUploading(true);
+    const problem = await uploadChosenPhoto(fd, "aboutPhoto");
+    setUploading(false);
+    if (problem) return setPhotoError(problem);
+    startTransition(() => action(fd));
+  };
   const v = (name: string, fallback: string) => state.values?.[name] ?? fallback;
   const err = (name: string) => errors[name] ? <p id={`${name}-error`} role="alert" style={errorStyle}>{errors[name]}</p> : null;
   const invalid = (name: string) => ({
@@ -26,7 +43,7 @@ export function SettingsForm({ settings }: { settings: Settings }) {
   const taxOn = state.values ? state.values.taxEnabled === "on" : settings.taxEnabled;
 
   return (
-    <form action={action}>
+    <form onSubmit={onSubmit}>
       <div style={field}>
         <label htmlFor="artistName" style={label}>Your name (shown at the top of the site)</label>
         <input id="artistName" name="artistName" defaultValue={v("artistName", settings.artistName)} style={input} {...invalid("artistName")} />
@@ -57,7 +74,8 @@ export function SettingsForm({ settings }: { settings: Settings }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img src={settings.aboutPhotoUrl} alt="" style={{ display: "block", maxWidth: 160, maxHeight: 160, marginBottom: 10 }} />
         )}
-        <input id="aboutPhoto" name="aboutPhoto" type="file" accept="image/*" style={{ fontSize: 16, maxWidth: "100%" }} {...invalid("aboutPhoto")} />
+        <input id="aboutPhoto" name="aboutPhoto" type="file" accept="image/*"
+          onChange={(e) => setPhotoError((e.target.files?.[0]?.size ?? 0) > MAX_PHOTO_BYTES ? TOO_BIG : null)} style={{ fontSize: 16, maxWidth: "100%" }} {...invalid("aboutPhoto")} />
         {err("aboutPhoto")}
       </div>
 
@@ -77,9 +95,9 @@ export function SettingsForm({ settings }: { settings: Settings }) {
       {state.message && <p role="alert" style={errorStyle}>{state.message}</p>}
       {state.saved && <p role="status" style={{ color: "#2f6b3a", fontSize: 15 }}>Saved.</p>}
 
-      <button type="submit" disabled={pending}
+      <button type="submit" disabled={busy || !!photoError}
         style={{ padding: "12px 24px", fontSize: 16, fontWeight: 500, background: "#222", color: "#fff", border: 0, borderRadius: 4, cursor: "pointer" }}>
-        {pending ? "Saving..." : "Save settings"}
+        {uploading ? "Uploading photo..." : pending ? "Saving..." : "Save settings"}
       </button>
     </form>
   );

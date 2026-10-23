@@ -27,7 +27,7 @@ Set aside about two hours. Keep a notes file open to paste values into as you go
 
 1. Open your project, then the **Storage** tab.
 2. Click **Create Database**, choose **Neon (Postgres)**, accept the defaults and connect it to the project. This adds the environment variable `DATABASE_URL` for you.
-3. Click **Create** again and choose **Blob**. Connect it to the project. This adds `BLOB_READ_WRITE_TOKEN` for you (it is where your painting photos are kept).
+3. Click **Create** again and choose **Blob**. When asked for access, choose **Public** (the site shows the photos to everyone). Connect it to the project. This adds `BLOB_READ_WRITE_TOKEN` for you (it is where your painting photos are kept; the Studio's photo uploads need this token).
 4. Confirm both appear under **Settings > Environment Variables**.
 
 ## Step 2. Create the database tables (run the migrations)
@@ -114,6 +114,7 @@ Do all of this in **Sandbox** mode first (`PAYPAL_ENV` is `sandbox`). Use your s
 4. **Outside the US.** Try an address in another country. Confirm it is **refused**.
 5. **Shipped email.** In the Studio, open **Orders** and tick **Shipped** on a test order. Confirm the email arrives in the buyer's inbox.
 6. **Tax report.** On the Orders page, pick the month and click **Download tax report**. Open the file and confirm the test sale appears with the right tax.
+7. **Studio on your phone.** On your phone, open `https://mbrownart.com/studio` and log in. Add a painting using a **full-size photo straight from your phone** (pick it from your photo library as it is, not a shrunk or emailed copy). Confirm it saves and shows on the site. Then **edit** it (for example change the title) and **reorder** it (move it up or down in the list). Confirm each change shows on the site. If the photo does not upload, **STOP** and get help from a developer or Claude.
 
 ### Switching to Live
 

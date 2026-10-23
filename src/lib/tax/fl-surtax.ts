@@ -5,6 +5,11 @@
 // Effective 2026-01-01 (fetched 2026-10-23). Counties with several surtaxes
 // use the form's "Total Surtax Rate". "None" on the form is 0.
 // UPDATE EACH JANUARY from the new calendar-year DR-15DSS.
+// Expiring 2026-12-31 (per the 2026 form), unless voters extend them:
+//   Brevard: 1% = two 0.5% surtaxes, both end 12/31/2026 -> 0%.
+//   Charlotte: 1% ends 12/31/2026 -> 0%.
+//   Liberty: 1.5% = 1% (no end date) + 0.5% ending 12/31/2026 -> 1%.
+//   Santa Rosa: 1% = 0.5% ending 12/31/2028 + 0.5% ending 12/31/2026 -> 0.5%.
 export const FL_SURTAX: Record<string, number> = {
   Alachua: 0.015,
   Baker: 0.01,

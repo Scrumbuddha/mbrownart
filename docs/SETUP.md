@@ -50,7 +50,6 @@ This step is run once, on a computer with the project downloaded and Node.js ins
 1. In your project, go to **Settings > Domains** and click **Add**.
 2. If you already own mbrownart.com, enter it and follow Vercel's instructions to change its DNS records (the records are shown on screen; you paste them at your domain registrar). If you do not own it, buy it through Vercel's **Domains** page.
 3. Add `mbrownart.com` and, when asked, `www.mbrownart.com` (set one to redirect to the other).
-4. Add an environment variable: name `SITE_URL`, value `https://mbrownart.com`.
 
 ## Step 4. PayPal
 
@@ -119,9 +118,10 @@ Do all of this in **Sandbox** mode first (`PAYPAL_ENV` is `sandbox`). Use your s
 ### Switching to Live
 
 1. At developer.paypal.com, flip the toggle at the top to **Live**. Create a Live app and a Live webhook exactly as in Step 4 (same URL, same event).
-2. In Vercel, replace `PAYPAL_CLIENT_ID`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and `PAYPAL_WEBHOOK_ID` with the **Live** values, and set `PAYPAL_ENV` to `live`.
+2. In Vercel (**Settings > Environment Variables**), replace `PAYPAL_CLIENT_ID`, `NEXT_PUBLIC_PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` and `PAYPAL_WEBHOOK_ID` with the **Live** values, and set `PAYPAL_ENV` to `live`. Set them for the **Production** environment (tick Production when saving). Replace all four together: a sandbox `PAYPAL_WEBHOOK_ID` with live keys makes webhooks fail, so payments will not be recorded properly.
 3. **Redeploy** (Step 7, item 1). Changed settings do nothing until you redeploy.
-4. Remove test paintings and orders you don't want public.
+4. Remove test paintings and orders you do not want public.
+5. Make one small real purchase (for example a print), confirm it appears in Studio Orders, then refund it in PayPal.
 
 ## Everyday use: the Orders page
 
@@ -136,7 +136,7 @@ County sales tax rates change. The file `src/lib/tax/fl-surtax.ts` holds them. *
 
 1. Each new year, the Florida Department of Revenue publishes form DR-15DSS (Discretionary Sales Surtax Information) at https://floridarevenue.com/Forms_library/current/ . Find the form for the new calendar year.
 2. Ask a developer or Claude to update `src/lib/tax/fl-surtax.ts` from it, then redeploy.
-3. Pay special attention to **Brevard, Charlotte, Liberty and Santa Rosa**: their surtaxes are reported to expire **12/31/2026**. (The code file itself does not say so; the new form is the proof.) Check these four first.
+3. These four counties have surtaxes ending **12/31/2026** (per the 2026 DR-15DSS): **Brevard** 1% (two 0.5% surtaxes, both end) drops to 0%; **Charlotte** 1% drops to 0%; **Liberty** 1.5% (1% with no end date plus 0.5% ending) drops to 1%; **Santa Rosa** 1% (0.5% ending 12/31/2028 plus 0.5% ending 12/31/2026) drops to 0.5%. That holds unless voters extend them; the new form decides.
 
 Do this in early January. Until it is done, the site may charge the wrong county tax.
 

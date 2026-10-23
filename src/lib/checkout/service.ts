@@ -248,8 +248,9 @@ async function captureClaimed(
     try {
       actual = await pp.getOrder(paypalOrderId);
     } catch {
-      // Unknown outcome: leave the order pending and the hold to expire; the webhook reconciles.
-      throw new CheckoutError("payment_failed");
+      // Unknown outcome: the buyer may have been charged, so they must not pay again. Leave the
+      // order pending and the hold to expire; the webhook reconciles.
+      throw new CheckoutError("unconfirmed");
     }
     if (actual.status === "COMPLETED") return recordPaidOrder(db, actual, o, now);
     // A declined capture ends this PayPal order; a retry is a fresh startCheckout.

@@ -1,6 +1,6 @@
 export type CheckoutErrorCode =
   | "sold" | "held" | "unavailable" | "not_us" | "amount_mismatch" | "payment_failed" | "in_progress"
-  | "total_changed";
+  | "total_changed" | "unconfirmed";
 
 const TRY_AGAIN = "Something went wrong and you were not charged. Please try again.";
 
@@ -15,6 +15,9 @@ export const CHECKOUT_MESSAGES: Record<CheckoutErrorCode, string> = {
   in_progress: "Your payment is being processed. Please wait a moment.",
   total_changed:
     "The total changed because sales tax was added for your shipping address. Please review and pay again.",
+  /** The capture may have gone through: the buyer must not pay again. */
+  unconfirmed:
+    "We couldn't confirm your payment. Please don't pay again. Check your email for a PayPal receipt, or contact us.",
 };
 
 export class CheckoutError extends Error {

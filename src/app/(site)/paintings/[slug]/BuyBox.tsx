@@ -40,6 +40,7 @@ export function BuyBox({ paintingId, options }: { paintingId: string; options: B
   const firstOpen = options.find((o) => !o.disabled)?.item ?? null;
   const [item, setItem] = useState<BuyItem | null>(firstOpen);
   const [error, setError] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
   // PayPal keeps the callbacks it was rendered with, so read the live choice from refs.
   const itemRef = useRef(item);
   const orderRef = useRef<string | null>(null);
@@ -91,8 +92,10 @@ export function BuyBox({ paintingId, options }: { paintingId: string; options: B
       router.push(`/thank-you?order=${encodeURIComponent(orderId)}`);
       return;
     }
-    // Includes 409 in_progress: show the message and stay on the page.
+    // Includes 409 in_progress and total_changed: show the message and stay on the page.
     fail(messageOf(r.body));
+    // The buyer may already have been charged: take the buttons away so they can't pay twice.
+    if (r.body.code === "unconfirmed") setLocked(true);
   };
 
   const onError: PayPalButtonsComponentProps["onError"] = () => {
@@ -104,7 +107,7 @@ export function BuyBox({ paintingId, options }: { paintingId: string; options: B
 
   return (
     <div className="buy-box">
-      <fieldset className="buy-options">
+      <fieldset className="buy-options" disabled={locked}>
         <legend className="visually-hidden">Choose what to buy</legend>
         {options.map((o) => (
           <label key={o.item} className={`buy-option${o.disabled ? " is-disabled" : ""}`}>
@@ -127,7 +130,7 @@ export function BuyBox({ paintingId, options }: { paintingId: string; options: B
       {error ? <p className="buy-error" role="alert">{error}</p> : null}
 
       <div className="buy-buttons">
-        {clientId ? (
+        {locked ? null : clientId ? (
           <PayPalScriptProvider
             options={{
               clientId,

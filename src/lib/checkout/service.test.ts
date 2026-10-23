@@ -357,7 +357,11 @@ describe("checkout service", () => {
     pp.failNextCapture("declined");
     const realGet = pp.getOrder.bind(pp);
     pp.getOrder = async (id) => { if (pp.captureCount(id) > 0) throw new Error("network"); return realGet(id); };
-    await expectCode(completeCheckout(db, pp, paypalOrderId, t0), "payment_failed");
+    const attempt = completeCheckout(db, pp, paypalOrderId, t0);
+    await expectCode(attempt, "unconfirmed");
+    await expect(attempt).rejects.toThrow(
+      "We couldn't confirm your payment. Please don't pay again. Check your email for a PayPal receipt, or contact us.",
+    );
     expect((await order(db, paypalOrderId)).status).toBe("pending");
     expect((await painting(db, paintingId)).heldByOrderId).toBe((await order(db, paypalOrderId)).id);
   });

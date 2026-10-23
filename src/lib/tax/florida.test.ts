@@ -22,6 +22,17 @@ describe("computeTax", () => {
   it("charges state 6% only for an unknown FL ZIP", () => {
     expect(computeTax({ ...base, zip: "00000" })).toEqual({ taxCents: 2580, county: null });
   });
+  it("normalises state and ZIP input", () => {
+    expect(computeTax({ ...base, state: " fl " })).toEqual({ taxCents: 3010, county: "Pinellas" });
+    expect(computeTax({ ...base, zip: "33701-1234" }).county).toBe("Pinellas");
+    expect(computeTax({ ...base, zip: " 33701 " }).county).toBe("Pinellas");
+  });
+  it("applies surtax to the full base at exactly the cap", () => {
+    expect(computeTax({ ...base, itemCents: 499000 }).taxCents).toBe(30000 + 5000);
+  });
+  it("rounds half-cents up", () => {
+    expect(computeTax({ ...base, zip: "00000", itemCents: 25, shippingCents: 0 }).taxCents).toBe(2);
+  });
   it("has a surtax entry for every county in the ZIP map", () => {
     const names = new Set(Object.values(zipCounty as Record<string, string[]>).flat());
     expect(names.size).toBe(67);

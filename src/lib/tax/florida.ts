@@ -12,9 +12,10 @@ export function computeTax(input: {
   shippingCents: number;
   enabled: boolean;
 }): { taxCents: number; county: string | null } {
-  if (!input.enabled || input.state !== "FL") return { taxCents: 0, county: null };
+  if (!input.enabled || input.state.trim().toUpperCase() !== "FL") return { taxCents: 0, county: null };
 
-  const counties = ZIP_COUNTY[input.zip.slice(0, 5)] ?? [];
+  const counties = ZIP_COUNTY[input.zip.trim().match(/\d{5}/)?.[0] ?? ""] ?? [];
+  // ZCTA-derived data misses some real ZIPs (e.g. PO-box-only); those get 6% state tax only.
   let county: string | null = null;
   for (const c of counties) {
     if (county === null || (FL_SURTAX[c] ?? 0) > (FL_SURTAX[county] ?? 0)) county = c;

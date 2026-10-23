@@ -10,6 +10,8 @@ export type SettingsResult =
   | { ok: false; errors: Record<string, string> };
 
 const MAX_SHIPPING_CENTS = 100_000; // $1,000
+const SHIPPING_FORMAT = "Enter the shipping fee in dollars, like 10 or 7.50.";
+const SHIPPING_TOO_HIGH = "Please enter a shipping fee of $1,000 or less.";
 const text = (raw: FormLike, name: string) => String(raw.get(name) ?? "").trim();
 
 export function validateSettingsInput(raw: FormLike): SettingsResult {
@@ -20,14 +22,14 @@ export function validateSettingsInput(raw: FormLike): SettingsResult {
 
   const fee = parsePrice(text(raw, "shipping"));
   let shippingCents = 0;
-  if ("error" in fee) errors.shipping = fee.error;
-  else if (fee.cents == null) errors.shipping = "Enter the shipping fee in dollars, like 10. Use 0 for free shipping.";
-  else if (fee.cents > MAX_SHIPPING_CENTS) errors.shipping = "Shipping can't be more than $1,000.";
+  if ("error" in fee) errors.shipping = fee.error.includes("under") ? SHIPPING_TOO_HIGH : SHIPPING_FORMAT;
+  else if (fee.cents == null) errors.shipping = SHIPPING_FORMAT;
+  else if (fee.cents > MAX_SHIPPING_CENTS) errors.shipping = SHIPPING_TOO_HIGH;
   else shippingCents = fee.cents;
 
   const contactEmail = text(raw, "contactEmail");
-  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
-    errors.contactEmail = "That doesn't look like an email address.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+    errors.contactEmail = "Please enter your email address, like name@example.com.";
   }
 
   const instagram = text(raw, "instagramUrl");

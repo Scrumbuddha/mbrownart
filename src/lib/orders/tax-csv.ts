@@ -18,10 +18,10 @@ function cell(s: string): string {
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-/** Paid orders in `month` ('YYYY-MM', Florida time) that collected tax, as CSV. */
+/** Paid orders (excluding sold_twice ones, which are refunded) in `month` ('YYYY-MM', Florida time) that collected tax, as CSV. */
 export function taxCsv(orders: Order[], month: string): string {
   const rows = orders
-    .filter((o) => o.status === "paid" && o.paidAt && o.taxCents > 0 && floridaDate(o.paidAt).startsWith(`${month}-`))
+    .filter((o) => o.status === "paid" && o.attention !== "sold_twice" && o.paidAt && o.taxCents > 0 && floridaDate(o.paidAt).startsWith(`${month}-`))
     .sort((a, b) => a.paidAt!.getTime() - b.paidAt!.getTime())
     .map((o) => [
       floridaDate(o.paidAt!),

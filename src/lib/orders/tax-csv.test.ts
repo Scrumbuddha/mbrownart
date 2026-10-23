@@ -6,7 +6,7 @@ const order = (over: Partial<Order> = {}): Order => ({
   id: "1", paypalOrderId: "P", paintingId: "x", item: "original", status: "paid",
   itemCents: 42000, shippingCents: 1000, taxCents: 3010, totalCents: 46010, taxCounty: "Pinellas",
   buyerName: "A", buyerEmail: "a@b.c", shipTo: null, createdAt: new Date(),
-  paidAt: new Date("2026-11-03T17:00:00Z"), shippedAt: null, captureStartedAt: null, attention: null,
+  paidAt: new Date("2026-11-03T17:00:00Z"), shippedAt: null, shippedEmailSentAt: null, captureStartedAt: null, attention: null,
   ...over,
 });
 const HEADER = "date,county,taxable_amount,tax_collected";
@@ -31,6 +31,11 @@ describe("taxCsv", () => {
   it("uses standard time after the fall change (Dec 1 00:30 UTC is Nov 30 in Florida)", () => {
     const o = order({ paidAt: new Date("2026-12-01T00:30:00Z") });
     expect(taxCsv([o], "2026-11")).toContain("2026-11-30,");
+  });
+  it("excludes sold_twice orders but keeps amount_mismatch", () => {
+    expect(taxCsv([order({ attention: "sold_twice" })], "2026-11")).toBe(`${HEADER}
+`);
+    expect(taxCsv([order({ attention: "amount_mismatch" })], "2026-11")).toContain("2026-11-03");
   });
   it("quotes a county containing a comma", () => {
     expect(taxCsv([order({ taxCounty: "Foo, Bar" })], "2026-11")).toContain('"Foo, Bar"');

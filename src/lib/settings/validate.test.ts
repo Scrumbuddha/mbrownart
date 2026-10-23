@@ -4,7 +4,7 @@ import { getSettings, updateSettings } from "../db/settings";
 import { validateSettingsInput } from "./validate";
 
 const form = (o: Record<string, string>) => new Map(Object.entries(o)) as unknown as FormData;
-const base = { artistName: "M Brown", shipping: "10" };
+const base = { artistName: "M Brown", shipping: "10", contactEmail: "m@example.com" };
 
 describe("validateSettingsInput", () => {
   it("converts the shipping fee to cents and reads the tax switch", () => {
@@ -19,6 +19,20 @@ describe("validateSettingsInput", () => {
       const r = validateSettingsInput(form({ ...base, shipping }));
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.errors.shipping).toBeTruthy();
+    }
+  });
+  it("requires a contact email", () => {
+    for (const contactEmail of ["", "nope"]) {
+      const r = validateSettingsInput(form({ ...base, contactEmail }));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.contactEmail).toBeTruthy();
+    }
+  });
+  it("uses shipping wording, not painting-price wording, for fee errors", () => {
+    for (const shipping of ["abc", "1000.01", "5000000"]) {
+      const r = validateSettingsInput(form({ ...base, shipping }));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.shipping).toMatch(/shipping fee/i);
     }
   });
   it("requires a name and sane email and Instagram link", () => {

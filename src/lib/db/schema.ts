@@ -55,6 +55,8 @@ export const orders = pgTable("orders", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   paidAt: timestamp("paid_at", { withTimezone: true }),
   shippedAt: timestamp("shipped_at", { withTimezone: true }),
+  /** Set when the shipped email was sent; null on a shipped order means it still needs sending. */
+  shippedEmailSentAt: timestamp("shipped_email_sent_at", { withTimezone: true }),
   /** Set while a capture attempt is in flight; serialises concurrent completeCheckout calls. */
   captureStartedAt: timestamp("capture_started_at", { withTimezone: true }),
   /** Paid order that needs the artist's attention. */

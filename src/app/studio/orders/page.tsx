@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db/client";
 import { formatCents } from "@/lib/money";
 import { listPaidOrders, type PaidOrder } from "@/lib/orders/admin";
 import { floridaDate } from "@/lib/orders/tax-csv";
+import { ResendButton } from "./ResendButton";
 import { ShippedCheckbox } from "./ShippedCheckbox";
 
 export const dynamic = "force-dynamic";
@@ -42,8 +43,11 @@ function OrderCard({ o }: { o: PaidOrder }) {
         )}
         {o.buyerEmail && <><br /><span style={{ color: "#777" }}>{o.buyerEmail}</span></>}
       </p>
-      {o.shippedAt ? (
-        <p style={{ margin: 0, color: "#777", fontSize: 15 }}>Shipped {floridaDate(o.shippedAt)}</p>
+      {o.attention === "sold_twice" ? null : o.shippedAt ? (
+        <>
+          <p style={{ margin: "0 0 8px", color: "#777", fontSize: 15 }}>Shipped {floridaDate(o.shippedAt)}</p>
+          {!o.shippedEmailSentAt && <ResendButton orderId={o.id} />}
+        </>
       ) : (
         <ShippedCheckbox orderId={o.id} />
       )}

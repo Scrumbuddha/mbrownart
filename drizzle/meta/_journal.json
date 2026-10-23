@@ -15,6 +15,13 @@
       "when": 1792766504907,
       "tag": "0001_lame_kulan_gath",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792770177060,
+      "tag": "0002_broken_luminals",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 export const SESSION_COOKIE = "studio_session";
+export const MIN_SECRET_LENGTH = 32;
 export const SESSION_MAX_AGE_S = 30 * 24 * 60 * 60;
 
 const key = (secret: string) => new TextEncoder().encode(secret);
@@ -49,7 +50,7 @@ export function checkPassword(input: string, expected: string): boolean {
 /** True when the request carries a valid Studio session cookie. Fails closed if SESSION_SECRET is unset. */
 export async function isStudioRequest(): Promise<boolean> {
   const secret = process.env.SESSION_SECRET;
-  if (!secret) return false;
+  if (!secret || secret.length < MIN_SECRET_LENGTH) return false;
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   return verifySessionToken(secret, token, new Date());
 }

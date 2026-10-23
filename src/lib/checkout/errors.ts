@@ -1,4 +1,5 @@
-export type CheckoutErrorCode = "sold" | "held" | "unavailable" | "not_us" | "amount_mismatch" | "payment_failed";
+export type CheckoutErrorCode =
+  | "sold" | "held" | "unavailable" | "not_us" | "amount_mismatch" | "payment_failed" | "in_progress";
 
 const TRY_AGAIN = "Something went wrong and you were not charged. Please try again.";
 
@@ -10,6 +11,7 @@ export const CHECKOUT_MESSAGES: Record<CheckoutErrorCode, string> = {
   unavailable: TRY_AGAIN,
   amount_mismatch: TRY_AGAIN,
   payment_failed: TRY_AGAIN,
+  in_progress: "Your payment is being processed. Please wait a moment.",
 };
 
 export class CheckoutError extends Error {

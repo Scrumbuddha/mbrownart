@@ -8,6 +8,8 @@ import { computeTax } from "../tax/florida";
 import { CheckoutError } from "./errors";
 
 export const HOLD_MS = 15 * 60 * 1000;
+/** A capture claim older than this is treated as abandoned (e.g. the process died mid-capture). */
+export const CAPTURE_CLAIM_MS = 2 * 60 * 1000;
 
 const amountsOf = (o: Order): Amounts => ({
   itemCents: o.itemCents, shippingCents: o.shippingCents, taxCents: o.taxCents,
@@ -20,7 +22,7 @@ async function orderByPayPalId(db: Db, paypalOrderId: string): Promise<Order> {
 }
 
 async function markFailed(db: Db, orderId: string): Promise<void> {
-  await db.update(orders).set({ status: "failed" })
+  await db.update(orders).set({ status: "failed", captureStartedAt: null })
     .where(and(eq(orders.id, orderId), eq(orders.status, "pending")));
 }
 
@@ -46,17 +48,64 @@ async function claimHold(db: Db, paintingId: string, orderId: string, now: Date)
   return rows.length === 1;
 }
 
-/** Recomputes tax from the order's locked amounts and saves it. Returns the updated order. */
-async function saveTax(db: Db, o: Order, state: string, zip: string): Promise<Order> {
+/**
+ * Atomically marks a capture attempt as started. Only one attempt per order can hold the
+ * claim; a claim older than CAPTURE_CLAIM_MS is considered abandoned and can be taken over.
+ */
+async function claimCapture(db: Db, orderId: string, now: Date): Promise<Order | null> {
+  const [row] = await db.update(orders)
+    .set({ captureStartedAt: now })
+    .where(and(
+      eq(orders.id, orderId),
+      eq(orders.status, "pending"),
+      or(isNull(orders.captureStartedAt), lt(orders.captureStartedAt, new Date(now.getTime() - CAPTURE_CLAIM_MS))),
+    ))
+    .returning();
+  return row ?? null;
+}
+
+/** Ends a capture attempt that did not pay, so a retry or the webhook can proceed. */
+async function releaseCapture(db: Db, orderId: string): Promise<void> {
+  await db.update(orders).set({ captureStartedAt: null })
+    .where(and(eq(orders.id, orderId), ne(orders.status, "paid")));
+}
+
+/**
+ * Recomputes tax from the order's locked amounts and saves it, but only while the order is
+ * pending and `claim` matches (null = no capture in flight; a Date = our own capture claim).
+ * Throws `in_progress` if the order is no longer writable.
+ */
+async function saveTax(db: Db, o: Order, state: string, zip: string, claim: Date | null): Promise<Order> {
   const { taxEnabled } = await getSettings(db);
   const { taxCents, county } = computeTax({
     state, zip, itemCents: o.itemCents, shippingCents: o.shippingCents, enabled: taxEnabled,
   });
   const [row] = await db.update(orders)
     .set({ taxCents, taxCounty: county, totalCents: o.itemCents + o.shippingCents + taxCents })
-    .where(eq(orders.id, o.id))
+    .where(and(
+      eq(orders.id, o.id),
+      eq(orders.status, "pending"),
+      claim ? eq(orders.captureStartedAt, claim) : isNull(orders.captureStartedAt),
+    ))
     .returning();
+  if (!row) throw new CheckoutError("in_progress");
   return row;
+}
+
+async function pushAmounts(pp: PayPalApi, paypalOrderId: string, a: Amounts): Promise<void> {
+  try {
+    await pp.updateAmounts(paypalOrderId, a);
+  } catch {
+    throw new CheckoutError("payment_failed");
+  }
+}
+
+async function fetchPayPalOrder(pp: PayPalApi, paypalOrderId: string): Promise<PayPalOrder> {
+  try {
+    return await pp.getOrder(paypalOrderId);
+  } catch {
+    throw new CheckoutError("payment_failed");
+  }
 }
 
 export async function startCheckout(
@@ -112,9 +161,8 @@ export async function updateShipping(
   if (input.country.trim().toUpperCase() !== "US") throw new CheckoutError("not_us");
   const o = await orderByPayPalId(db, input.paypalOrderId);
   if (o.status !== "pending") return amountsOf(o);
-  const updated = await saveTax(db, o, input.state, input.zip);
-  const amounts = amountsOf(updated);
-  await pp.updateAmounts(input.paypalOrderId, amounts);
+  const amounts = amountsOf(await saveTax(db, o, input.state, input.zip, null));
+  await pushAmounts(pp, input.paypalOrderId, amounts);
   return amounts;
 }
 
@@ -124,21 +172,45 @@ export async function completeCheckout(
   paypalOrderId: string,
   now: Date,
 ): Promise<Order> {
-  let o = await orderByPayPalId(db, paypalOrderId);
-  if (o.status === "paid") return o;
-  if (o.status !== "pending") throw new CheckoutError("payment_failed");
+  const current = await orderByPayPalId(db, paypalOrderId);
+  if (current.status === "paid") return current;
+  if (current.status !== "pending") throw new CheckoutError("payment_failed");
 
+  const claimed = await claimCapture(db, current.id, now);
+  if (!claimed) {
+    const [again] = await db.select().from(orders).where(eq(orders.id, current.id));
+    if (again.status === "paid") return again;
+    if (again.status === "failed") throw new CheckoutError("payment_failed");
+    throw new CheckoutError("in_progress");
+  }
+
+  try {
+    return await captureClaimed(db, pp, claimed, paypalOrderId, now);
+  } catch (e) {
+    // Any attempt that ends without paying gives the claim back (no-op once paid).
+    await releaseCapture(db, claimed.id);
+    throw e;
+  }
+}
+
+async function captureClaimed(
+  db: Db,
+  pp: PayPalApi,
+  claimed: Order,
+  paypalOrderId: string,
+  now: Date,
+): Promise<Order> {
   // Price the order from PayPal's ship-to; never trust the browser's earlier updateShipping.
-  let ppOrder = await pp.getOrder(paypalOrderId);
+  let ppOrder = await fetchPayPalOrder(pp, paypalOrderId);
   const shipTo: ShipTo | null = ppOrder.shipTo;
   if (!shipTo) throw new CheckoutError("amount_mismatch");
   if (shipTo.country.trim().toUpperCase() !== "US") throw new CheckoutError("not_us");
-  const repriced = await saveTax(db, o, shipTo.state, shipTo.zip);
-  if (repriced.taxCents !== o.taxCents) {
-    await pp.updateAmounts(paypalOrderId, amountsOf(repriced));
-    ppOrder = await pp.getOrder(paypalOrderId);
+  const o = await saveTax(db, claimed, shipTo.state, shipTo.zip, claimed.captureStartedAt);
+  // Push whenever PayPal disagrees, which also repairs an earlier failed updateAmounts.
+  if (ppOrder.totalCents !== o.totalCents) {
+    await pushAmounts(pp, paypalOrderId, amountsOf(o));
+    ppOrder = await fetchPayPalOrder(pp, paypalOrderId);
   }
-  o = repriced;
   if (ppOrder.totalCents !== o.totalCents) throw new CheckoutError("amount_mismatch");
 
   // An original must still be for sale and not held by someone else; (re)take the hold so no
@@ -169,13 +241,21 @@ export async function completeCheckout(
   return recordPaidOrder(db, captured, o, now);
 }
 
-/** Marks the order paid (and the original sold). Idempotent; shared with the webhook. */
+/**
+ * Marks the order paid (the money was taken, so this always happens) and, for an original,
+ * marks the painting sold if it was still ours to sell. Otherwise flags the order
+ * `sold_twice`; a captured total that differs from ours is flagged `amount_mismatch`.
+ * Idempotent; shared with the webhook.
+ */
 export async function recordPaidOrder(
   db: Db,
   paypalOrder: PayPalOrder,
   orderRow: Order,
   now: Date,
 ): Promise<Order> {
+  if (paypalOrder.id !== orderRow.paypalOrderId) {
+    throw new Error(`PayPal order ${paypalOrder.id} does not belong to order ${orderRow.id}`);
+  }
   if (paypalOrder.status !== "COMPLETED") throw new CheckoutError("payment_failed");
   return db.transaction(async (tx) => {
     const [paid] = await tx.update(orders)
@@ -192,11 +272,22 @@ export async function recordPaidOrder(
       const [existing] = await tx.select().from(orders).where(eq(orders.id, orderRow.id));
       return existing;
     }
+
+    let attention: Order["attention"] = paypalOrder.totalCents !== paid.totalCents ? "amount_mismatch" : null;
     if (paid.item === "original") {
-      await tx.update(paintings)
+      const sold = await tx.update(paintings)
         .set({ originalStatus: "sold", heldUntil: null, heldByOrderId: null })
-        .where(eq(paintings.id, paid.paintingId));
+        .where(and(
+          eq(paintings.id, paid.paintingId),
+          eq(paintings.originalStatus, "for_sale"),
+          or(isNull(paintings.heldByOrderId), eq(paintings.heldByOrderId, paid.id), lt(paintings.heldUntil, now)),
+        ))
+        .returning({ id: paintings.id });
+      // sold_twice is the more serious problem, so it wins over amount_mismatch.
+      if (sold.length === 0) attention = "sold_twice";
     }
-    return paid;
+    if (!attention) return paid;
+    const [flagged] = await tx.update(orders).set({ attention }).where(eq(orders.id, paid.id)).returning();
+    return flagged;
   });
 }
